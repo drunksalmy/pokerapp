@@ -261,7 +261,7 @@ export default function TableScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Felt.woodBottom },
   arena: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     paddingTop: HEADER_SPACE,
     paddingBottom: ACTION_BAR_SPACE + SEAT_BELOW_ANCHOR,
     alignItems: 'center',
@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
   gear: { color: '#fff', fontSize: 14 },
   feltBox: { position: 'relative' },
   centre: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 7
