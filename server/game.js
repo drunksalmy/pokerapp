@@ -215,7 +215,7 @@ function advance(state) {
     const canAct = state.players.filter(p => !p.folded && !p.allIn);
     if (canAct.length > 1) {
       const n = state.players.length;
-      const first = n === 2 ? (state.dealerIndex + 1) % n : (state.dealerIndex + 1) % n;
+      const first = (state.dealerIndex + 1) % n;
       state.actingIndex = nextActiveFrom(state, first);
       return;
     }
