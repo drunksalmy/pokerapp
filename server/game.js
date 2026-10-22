@@ -49,6 +49,12 @@ function startHand(seatedPlayers, dealerIndex, smallBlind, bigBlind) {
   state.actingIndex = n === 2 ? dealerIndex : (bbIndex + 1) % n;
   state.actingIndex = nextActiveFrom(state, state.actingIndex);
 
+  // Posting blinds can put every remaining player all-in before anyone gets
+  // to act (two short stacks heads-up). Nobody can act, so run the board out
+  // now -- otherwise the hand sits forever waiting for an action that can
+  // never come, and the action clock has no one to time out.
+  if (state.actingIndex === null) advance(state);
+
   return state;
 }
 
