@@ -19,9 +19,18 @@ virtual-chips product as a complete thing first.
 
 ## Stack
 
-- **Frontend:** React Native via Expo, **SDK 54 — pinned, do not upgrade.**
-  The publicly available Expo Go app on the App Store / Play Store caps at
-  SDK 54. Newer SDKs won't open in it.
+- **Frontend:** React Native via Expo, **SDK 57** (React Native 0.86.3,
+  React 19.2.3, TypeScript 6).
+  **Do not pin to an old SDK.** This file used to say "SDK 54, pinned, do not
+  upgrade, Expo Go caps at SDK 54". That was true when written and became
+  false without warning: Expo Go on the App Store always runs the *newest*
+  SDK, and iOS cannot install an older Expo Go. When Expo Go moves ahead, the
+  project must follow or it simply stops opening on a phone. Upgrade one SDK
+  at a time: `npm install expo@^NN.0.0`, then `npx expo install --fix`, then
+  `npx expo-doctor` and `npx expo export --platform web` to verify.
+- **Expo Go now requires signing in.** Both the CLI (`npx expo login`) and the
+  Expo Go app on the phone must be signed in to the same Expo account, or the
+  project refuses to open.
 - **Backend:** Node.js + Express + Socket.io (real-time, server-authoritative)
 - **Database:** Supabase (Postgres) — project name `pokerapp`, Singapore region
 - **Hand evaluation:** `pokersolver`
@@ -79,11 +88,21 @@ object and an action, it returns the updated state.
 Handles: blinds, heads-up rules (dealer is SB, acts first preflop / last
 postflop), big blind option, min-raise enforcement, all-ins, **side pots**,
 split pots with odd-chip remainders, and dead money from folded overbettors.
-Fuzz-tested over 20,000 random hands: no crashes, no hangs, no chip leaks.
+
+`server/fuzz-game.js` is the fuzz harness and runs as part of `npm test`:
+20,000 random hands per run, checking chip conservation, no deadlocks, no
+negative stacks, no duplicate cards and no leaked hole cards after every
+single action. Seeded, so a failure replays exactly. Re-run `npm test` after
+any engine change -- the harness already caught one real deadlock that the
+scripted scenarios missed.
 
 ## What's LEFT (in order)
 
-**Phase 4 — Socket.io layer.** The big one. Table rooms, seating, turn
+> **This section is out of date. `CONTEXT.md` is the current status doc.**
+> Phases 4 and 6 are built, committed and pushed. Phase 5 (auth + persistence)
+> is the real next phase.
+
+**Phase 4 — Socket.io layer.** *(DONE — `server/table.js`, `server/index.js`.)* The big one. Table rooms, seating, turn
 broadcasting, per-player `publicState`, action timers so one AFK player doesn't
 freeze the table, and reconnect handling (phones drop wifi constantly — a
 mid-hand disconnect should auto-fold/auto-check, not hang).

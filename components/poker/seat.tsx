@@ -149,7 +149,7 @@ export function Seat({
           too tall for the top and bottom positions on a phone in landscape. */}
       <View style={[styles.plate, isViewer && styles.plateViewer]}>
         <Text style={styles.name} numberOfLines={1}>
-          {seat.name}
+          {isViewer ? 'You' : seat.name}
         </Text>
         <Text style={styles.stackText}>{formatChips(player?.stack ?? seat.stack)}</Text>
       </View>

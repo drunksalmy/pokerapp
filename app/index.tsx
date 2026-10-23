@@ -1,26 +1,38 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ActionBar } from '@/components/poker/action-bar';
 import { ChipAmount } from '@/components/poker/chip-amount';
 import { PlayingCard } from '@/components/poker/playing-card';
+import { PotGlow } from '@/components/poker/pot-glow';
 import { Seat } from '@/components/poker/seat';
 import { TableFelt } from '@/components/poker/table-felt';
 import { CardSize, Felt, Palette } from '@/constants/poker-theme';
 import { usePokerTable } from '@/hooks/use-poker-table';
-import { betPosition, formatChips, seatPositions, type Action } from '@/lib/poker';
+import {
+  betPosition,
+  carouselPositions,
+  formatChips,
+  type Action,
+  type CarouselSlot
+} from '@/lib/poker';
 
 const SEAT_W = 88;
 const SEAT_H = 100;
 // A seat widget is avatar-on-top with the name plate below it, so its visual
 // anchor is the avatar centre, not the middle of the box.
 const SEAT_ANCHOR_Y = 26;
-const TABLE_ASPECT = 2.5;
-const HEADER_SPACE = 40;
-const ACTION_BAR_SPACE = 66;
+// Portrait: the table is a tall oval, so width is the binding constraint and
+// the aspect is width/height rather than the old landscape 2.5.
+const TABLE_ASPECT = 0.52;
+const HEADER_SPACE = 58;
+// The pot glow hangs from the top edge and fades out before the table rim.
+const GLOW_HEIGHT = 190;
+// Two rows in portrait: the slider line plus the button line.
+const ACTION_BAR_SPACE = 104;
 // Seats ride the rim, so the name plate hanging below the avatar overhangs the
 // felt. The table has to be sized to leave room for it above the action bar.
 const SEAT_BELOW_ANCHOR = 58;
@@ -36,18 +48,24 @@ const STAGE_LABEL: Record<string, string> = {
 };
 
 export default function TableScreen() {
+  // Every client used to send the name "You", so every seat at the table read
+  // "You" with the same initial. Until Phase 5 brings real accounts, each
+  // client gets a distinct throwaway name for the life of the launch.
+  const [displayName] = useState(() => `Player ${Math.floor(1000 + Math.random() * 9000)}`);
+
   const { snapshot, status, error, clearError, sit, act, sitOut, userId } = usePokerTable({
     tableId: 'main',
-    name: 'You'
+    name: displayName
   });
 
+  const { width: screenWidth } = useWindowDimensions();
   const [feltBox, setFeltBox] = useState({ width: 0, height: 0 });
   const [raiseAmount, setRaiseAmount] = useState(0);
   const [now, setNow] = useState(Date.now());
 
-  // Landscape only: the whole layout assumes a wide table.
+  // Portrait only: the layout assumes a tall table with the viewer at the foot.
   useEffect(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     return () => {
       ScreenOrientation.unlockAsync().catch(() => {});
     };
@@ -76,10 +94,43 @@ export default function TableScreen() {
     }
   }, [boundsKey, bounds]);
 
-  const positions = useMemo(
-    () => seatPositions(snapshot?.maxSeats ?? 6, mySeat),
-    [snapshot?.maxSeats, mySeat]
+  // Which seat the carousel is turned to. Driven by whoever is to act, but it
+  // holds its last position when it is the viewer's turn or between hands --
+  // snapping the ring back to a default every time you act would be unreadable.
+  const actingSeat = useMemo(() => {
+    if (!hand?.toAct) return null;
+    return hand.players.find(p => p.userId === hand.toAct)?.seatIndex ?? null;
+  }, [hand]);
+
+  const [focusSeat, setFocusSeat] = useState<number | null>(null);
+  useEffect(() => {
+    if (actingSeat !== null && actingSeat !== mySeat) setFocusSeat(actingSeat);
+  }, [actingSeat, mySeat]);
+
+  // Never spotlight an empty chair. Until somebody acts, and whenever the
+  // remembered focus points at a seat nobody is sitting in, fall back to the
+  // first occupied opponent going round from the viewer's left.
+  const effectiveFocus = useMemo(() => {
+    if (focusSeat !== null && snapshot?.seats[focusSeat]) return focusSeat;
+    if (snapshot && mySeat !== null) {
+      for (let step = 1; step < snapshot.maxSeats; step++) {
+        const candidate = (mySeat + step) % snapshot.maxSeats;
+        if (snapshot.seats[candidate]) return candidate;
+      }
+    }
+    return focusSeat;
+  }, [focusSeat, snapshot, mySeat]);
+
+  const slots = useMemo(
+    () => carouselPositions(snapshot?.maxSeats ?? 6, mySeat, effectiveFocus),
+    [snapshot?.maxSeats, mySeat, effectiveFocus]
   );
+
+  const slotBySeat = useMemo(() => {
+    const map = new Map<number, CarouselSlot>();
+    for (const slot of slots) map.set(slot.seatIndex, slot);
+    return map;
+  }, [slots]);
 
   const remaining = useMemo(() => {
     if (!deadline || !snapshot) return null;
@@ -99,6 +150,8 @@ export default function TableScreen() {
     return STAGE_LABEL[hand.stage] ?? null;
   }, [hand, snapshot]);
 
+  const myStack = mySeat !== null ? snapshot?.seats[mySeat]?.stack ?? null : null;
+
   const handleSit = (seatIndex: number) => {
     if (!snapshot || mySeat !== null) return;
     sit(seatIndex, snapshot.bigBlind * BUY_IN_BLINDS);
@@ -113,13 +166,18 @@ export default function TableScreen() {
         style={StyleSheet.absoluteFill}
       />
 
+      <View style={styles.glowWrap} pointerEvents="none">
+        <PotGlow width={screenWidth} height={GLOW_HEIGHT} />
+      </View>
+
       {/* The felt owns the whole screen; the header and action bar float over
           it, which is what lets the table stay large on a phone. */}
       <View
         style={styles.arena}
         onLayout={e => {
           const { width, height } = e.nativeEvent.layout;
-          const maxW = width - 104;
+          // Seats straddle the rim, so half a seat widget overhangs each side.
+          const maxW = width - SEAT_W;
           const maxH = height - HEADER_SPACE - ACTION_BAR_SPACE - SEAT_BELOW_ANCHOR;
           let w = Math.min(maxW, maxH * TABLE_ASPECT);
           let h = w / TABLE_ASPECT;
@@ -144,12 +202,6 @@ export default function TableScreen() {
               ))}
             </View>
 
-            {hand && hand.pot > 0 && (
-              <View style={styles.pot}>
-                <ChipAmount amount={hand.pot} size={18} emphasis />
-              </View>
-            )}
-
             {announcement && (
               <View style={styles.announcement}>
                 <Text style={styles.announcementText}>{announcement}</Text>
@@ -160,8 +212,8 @@ export default function TableScreen() {
           {/* Each player's chips, pulled off their seat toward the pot. */}
           {hand?.players.map(player => {
             if (!player.betThisRound) return null;
-            const seatPos = positions[player.seatIndex];
-            if (!seatPos) return null;
+            const seatPos = slotBySeat.get(player.seatIndex);
+            if (!seatPos || seatPos.opacity === 0) return null;
             const bet = betPosition(seatPos);
             return (
               <View
@@ -176,7 +228,8 @@ export default function TableScreen() {
             );
           })}
 
-          {positions.map((pos, seatIndex) => {
+          {slots.map(slot => {
+            const seatIndex = slot.seatIndex;
             const seat = snapshot?.seats[seatIndex] ?? null;
             const player = hand?.players.find(p => p.seatIndex === seatIndex);
             const isViewer = seat?.userId === userId;
@@ -186,11 +239,14 @@ export default function TableScreen() {
             return (
               <View
                 key={seatIndex}
+                pointerEvents={slot.opacity === 0 ? 'none' : 'auto'}
                 style={[
                   styles.seat,
                   {
-                    left: pos.x * feltBox.width - SEAT_W / 2,
-                    top: pos.y * feltBox.height - SEAT_ANCHOR_Y
+                    left: slot.x * feltBox.width - SEAT_W / 2,
+                    top: slot.y * feltBox.height - SEAT_ANCHOR_Y,
+                    opacity: slot.opacity,
+                    transform: [{ scale: slot.scale }]
                   }
                 ]}>
                 <Seat
@@ -214,7 +270,14 @@ export default function TableScreen() {
           <Pressable style={styles.roundButton} hitSlop={8}>
             <Text style={styles.backArrow}>←</Text>
           </Pressable>
+          <View style={styles.mark} />
           <Text style={styles.headerTitle}>LOBBY</Text>
+
+          {/* The pot is the single biggest thing on the table (12.2). */}
+          <View style={styles.headerCentre} pointerEvents="none">
+            <Text style={styles.potLabel}>Pot</Text>
+            <Text style={styles.potValue}>{formatChips(hand?.pot ?? 0)}</Text>
+          </View>
 
           <View style={styles.headerRight}>
             {status !== 'connected' && (
@@ -226,6 +289,12 @@ export default function TableScreen() {
               <Text style={styles.blinds}>
                 {formatChips(snapshot.smallBlind)}/{formatChips(snapshot.bigBlind)}
               </Text>
+            )}
+            {myStack !== null && (
+              <View style={styles.bank}>
+                <View style={styles.coin} />
+                <Text style={styles.bankText}>{formatChips(myStack)}</Text>
+              </View>
             )}
             <Pressable
               style={styles.roundButton}
@@ -267,6 +336,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center'
   },
+  glowWrap: { position: 'absolute', top: 0, left: 0, right: 0, height: GLOW_HEIGHT },
   headerWrap: { position: 'absolute', top: 0, left: 0, right: 0 },
   header: {
     flexDirection: 'row',
@@ -283,6 +353,36 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.8)',
     textShadowRadius: 4
   },
+  mark: {
+    width: 14,
+    height: 14,
+    borderRadius: 5,
+    backgroundColor: Palette.accent
+  },
+  headerCentre: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    alignItems: 'center'
+  },
+  potLabel: {
+    color: Palette.textDim,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase'
+  },
+  potValue: {
+    color: Palette.text,
+    fontSize: 34,
+    fontWeight: '300',
+    letterSpacing: -0.5,
+    marginTop: -2
+  },
+  bank: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  coin: { width: 11, height: 11, borderRadius: 6, backgroundColor: Palette.gold },
+  bankText: { color: Palette.text, fontSize: 13, fontWeight: '700' },
   headerRight: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 10 },
   status: { color: Palette.danger, fontSize: 11, fontWeight: '700' },
   blinds: { color: Palette.textDim, fontSize: 12, fontWeight: '700' },
@@ -313,7 +413,6 @@ const styles = StyleSheet.create({
   },
   announcementText: { color: Palette.accent, fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
   community: { flexDirection: 'row', gap: 5, minHeight: CardSize.community.h },
-  pot: { marginTop: 2 },
   bet: { position: 'absolute', width: 80, alignItems: 'center' },
   seat: { position: 'absolute', width: SEAT_W, height: SEAT_H, alignItems: 'center' },
   actionBarWrap: { position: 'absolute', left: 0, right: 0, bottom: 0 },

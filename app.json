@@ -3,7 +3,7 @@
     "name": "pokerapp",
     "slug": "pokerapp",
     "version": "1.0.0",
-    "orientation": "landscape",
+    "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "pokerapp",
     "userInterfaceStyle": "dark",
@@ -40,7 +40,7 @@
       [
         "expo-screen-orientation",
         {
-          "initialOrientation": "LANDSCAPE"
+          "initialOrientation": "PORTRAIT"
         }
       ],
       "expo-font",

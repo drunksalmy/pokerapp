@@ -48,6 +48,26 @@ export function ActionBar({
 
   return (
     <View style={styles.bar}>
+      {/* Portrait is 414pt wide: buttons, amount box and slider cannot share
+          one row, so the slider gets its own line above them. */}
+      {bounds && (
+        <View style={styles.sliderRow}>
+          <View style={styles.amountBox}>
+            <Text style={styles.amountText}>{formatChips(raiseAmount)}</Text>
+          </View>
+
+          <BetSlider
+            min={bounds.min}
+            max={bounds.max}
+            step={bigBlind}
+            value={raiseAmount}
+            onChange={onChangeRaise}
+            disabled={false}
+          />
+        </View>
+      )}
+
+      <View style={styles.buttonRow}>
       <ActionButton
         label="FOLD"
         glyph="✕"
@@ -76,18 +96,7 @@ export function ActionBar({
         onPress={() => raiseVerb && onAct(raiseVerb, raiseAmount)}
       />
 
-      <View style={styles.amountBox}>
-        <Text style={styles.amountText}>{bounds ? formatChips(raiseAmount) : '—'}</Text>
       </View>
-
-      <BetSlider
-        min={bounds?.min ?? 0}
-        max={bounds?.max ?? 0}
-        step={bigBlind}
-        value={raiseAmount}
-        onChange={onChangeRaise}
-        disabled={!bounds}
-      />
     </View>
   );
 }
@@ -129,18 +138,18 @@ function ActionButton({
 
 const styles = StyleSheet.create({
   bar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     backgroundColor: Palette.bar
   },
+  sliderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  buttonRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   button: {
-    minWidth: 92,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderRadius: 10,
     backgroundColor: Palette.barRaised,
     alignItems: 'center',
     justifyContent: 'center'
@@ -158,10 +167,10 @@ const styles = StyleSheet.create({
   },
   foldAmount: { color: Palette.textDim },
   amountBox: {
-    minWidth: 62,
-    paddingVertical: 12,
+    minWidth: 76,
+    paddingVertical: 10,
     paddingHorizontal: 10,
-    borderRadius: 8,
+    borderRadius: 10,
     backgroundColor: Palette.barRaised,
     alignItems: 'center'
   },

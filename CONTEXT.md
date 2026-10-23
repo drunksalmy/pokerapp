@@ -40,6 +40,7 @@ committed and pushed. Actual state:
 | 6 — Mobile UI (table screen) | **Done** — built ahead of order from a design reference |
 | **5 — Auth + persistence** | **NOT DONE — the real next phase** |
 | 7 — Hosting (Render/Railway) | Not done |
+| SDK 54 → 57 upgrade | **Done** — branch `sdk-57-upgrade` |
 | 8 — Distribution (Expo Go + QR) | Not done |
 | UI redesign (section 12) | **Spec'd, not started** |
 | Deferred — real-money compliance | Not started, intentionally |
@@ -47,17 +48,35 @@ committed and pushed. Actual state:
 Phase 6 was built before Phase 5 because the owner supplied a design reference
 and asked for the UI. That is why persistence is the gap.
 
-**The app has never run on a real phone.** See section 9.
+**The app HAS now run on a real phone** (iPhone 11, Expo Go, SDK 57) and
+renders in landscape: table, six seats, seat plate, action bar and bet slider
+all present. The bottom-centre seat plate clears the action bar. The
+top-centre seat versus the community card row is **still unverified**, because
+that check needs a hand in progress and so a second player at the table.
 
 ---
 
 ## 3. Stack and exact versions
 
-**Expo SDK 54 — PINNED. DO NOT UPGRADE.** The public Expo Go app on the App
-Store / Play Store caps at SDK 54; a newer SDK simply will not open in it.
+**Expo SDK 57.** React Native 0.86.3, React 19.2.3, TypeScript 6.
+
+This file used to read "SDK 54 — PINNED. DO NOT UPGRADE. The public Expo Go
+app caps at SDK 54." That was true when written and silently became false.
+Expo Go on the App Store runs only the *newest* SDK, and iOS cannot install an
+older Expo Go, so when Expo Go moved to SDK 57 the pin is what stopped the
+project opening on a phone -- the project was not too new, it was too old.
+**Treat the SDK as something to keep in step with Expo Go, not something to
+freeze.** Upgrade one version at a time; SDK 55 and 56 were never released to
+the App Store, so intermediate hops can only be verified with `expo-doctor`
+and `npx expo export --platform web`, never on a device.
+
+**Expo Go requires sign-in.** Both `npx expo login` on the PC and the Expo Go
+app on the phone must be signed in to the same Expo account, or the project
+refuses to open with "You need to be signed in to Expo Go and Expo CLI".
 
 `AGENTS.md` requires reading the exact versioned docs at
-<https://docs.expo.dev/versions/v54.0.0/> **before writing any Expo code.**
+<https://docs.expo.dev/versions/v57.0.0/> **before writing any Expo code.**
+If the SDK changes, that URL changes in the same commit.
 
 Client (`package.json`):
 
