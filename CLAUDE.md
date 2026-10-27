@@ -19,8 +19,8 @@ virtual-chips product as a complete thing first.
 
 ## Stack
 
-- **Frontend:** React Native via Expo, **SDK 57** (React Native 0.86.3,
-  React 19.2.3, TypeScript 6).
+- **Frontend:** React Native via Expo, **SDK 58** (React Native 0.88.0,
+  React 19.3.0, TypeScript 6).
   **Do not pin to an old SDK.** This file used to say "SDK 54, pinned, do not
   upgrade, Expo Go caps at SDK 54". That was true when written and became
   false without warning: Expo Go on the App Store always runs the *newest*
