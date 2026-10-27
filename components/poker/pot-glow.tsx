@@ -34,3 +34,34 @@ export function PotGlow({ width, height }: { width: number; height: number }) {
     </View>
   );
 }
+
+/**
+ * The bloom where the pot's light lands on the table: a soft violet glow
+ * centred on the top of the arc, drawn over the felt. Without it the felt,
+ * which is drawn after the pot glow, swallows the light and the arc reads as
+ * dark on dark.
+ */
+export function ArcGlow({ width, height }: { width: number; height: number }) {
+  if (width <= 0 || height <= 0) return null;
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Svg width={width} height={height}>
+        <Defs>
+          <RadialGradient id="arcGlow" cx="50%" cy="50%" rx="50%" ry="50%">
+            <Stop offset="0" stopColor={Palette.accent} stopOpacity={0.5} />
+            <Stop offset="0.45" stopColor={Palette.accent} stopOpacity={0.16} />
+            <Stop offset="1" stopColor={Palette.accent} stopOpacity={0} />
+          </RadialGradient>
+        </Defs>
+        <Ellipse
+          cx={width / 2}
+          cy={height / 2}
+          rx={width / 2}
+          ry={height / 2}
+          fill="url(#arcGlow)"
+        />
+      </Svg>
+    </View>
+  );
+}

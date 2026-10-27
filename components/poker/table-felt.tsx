@@ -3,11 +3,15 @@ import Svg, { Defs, Ellipse, RadialGradient, Stop } from 'react-native-svg';
 
 import { Felt } from '@/constants/poker-theme';
 
-const RAIL = 14;
+const RAIL = 20;
 
 /**
- * The table surface: a dark rail with the felt inside it, lit from just above
- * the middle. Radial gradients need SVG — expo-linear-gradient is linear only.
+ * The table surface: a dark rail with the felt inside it. Given a square box it
+ * draws a true circle, which is how the table screen uses it. Radial gradients
+ * need SVG — expo-linear-gradient is linear only.
+ *
+ * Only the top arc of the circle is on screen, so the light sits high, under
+ * the pot, rather than at the circle's true centre.
  */
 export function TableFelt({ width, height }: { width: number; height: number }) {
   if (width <= 0 || height <= 0) return null;
@@ -21,18 +25,28 @@ export function TableFelt({ width, height }: { width: number; height: number }) 
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <Svg width={width} height={height}>
         <Defs>
-          <RadialGradient id="feltFill" cx="50%" cy="42%" rx="62%" ry="78%">
+          <RadialGradient id="feltFill" cx="50%" cy="24%" rx="58%" ry="58%">
             <Stop offset="0" stopColor={Felt.centre} />
             <Stop offset="0.5" stopColor={Felt.mid} />
             <Stop offset="1" stopColor={Felt.edge} />
           </RadialGradient>
-          <RadialGradient id="railFill" cx="50%" cy="35%" rx="60%" ry="75%">
+          <RadialGradient id="railFill" cx="50%" cy="20%" rx="60%" ry="60%">
             <Stop offset="0" stopColor={Felt.railHighlight} />
             <Stop offset="1" stopColor={Felt.rail} />
           </RadialGradient>
         </Defs>
 
-        <Ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="url(#railFill)" />
+        {/* A faint lit edge on the rail, so the table's outline reads against
+            the dark room the way it does in the design. */}
+        <Ellipse
+          cx={cx}
+          cy={cy}
+          rx={rx - 1}
+          ry={ry - 1}
+          fill="url(#railFill)"
+          stroke="rgba(185,163,255,0.16)"
+          strokeWidth={1.5}
+        />
         <Ellipse
           cx={cx}
           cy={cy}

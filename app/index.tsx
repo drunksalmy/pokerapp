@@ -2,40 +2,31 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ActionBar } from '@/components/poker/action-bar';
-import { ChipAmount } from '@/components/poker/chip-amount';
+import { ActionBar, reservedBottomFor } from '@/components/poker/action-bar';
+import { BankPanel } from '@/components/poker/bank-panel';
+import { CarouselItem } from '@/components/poker/carousel-item';
+import { HERO_HAND_HEIGHT, HERO_HAND_WIDTH, HeroHand } from '@/components/poker/hero-hand';
 import { PlayingCard } from '@/components/poker/playing-card';
-import { PotGlow } from '@/components/poker/pot-glow';
-import { Seat } from '@/components/poker/seat';
+import { ArcGlow, PotGlow } from '@/components/poker/pot-glow';
+import { Seat, SEAT_ANCHOR_Y, SEAT_HEIGHT, SEAT_WIDTH } from '@/components/poker/seat';
 import { TableFelt } from '@/components/poker/table-felt';
 import { CardSize, Felt, Palette } from '@/constants/poker-theme';
 import { usePokerTable } from '@/hooks/use-poker-table';
 import {
-  betPosition,
+  boardCentre,
   carouselPositions,
   formatChips,
-  type Action,
-  type CarouselSlot
+  tableGeometry,
+  type Action
 } from '@/lib/poker';
 
-const SEAT_W = 88;
-const SEAT_H = 100;
-// A seat widget is avatar-on-top with the name plate below it, so its visual
-// anchor is the avatar centre, not the middle of the box.
-const SEAT_ANCHOR_Y = 26;
-// Portrait: the table is a tall oval, so width is the binding constraint and
-// the aspect is width/height rather than the old landscape 2.5.
-const TABLE_ASPECT = 0.52;
-const HEADER_SPACE = 58;
-// The pot glow hangs from the top edge and fades out before the table rim.
-const GLOW_HEIGHT = 190;
-// Two rows in portrait: the slider line plus the button line.
-const ACTION_BAR_SPACE = 104;
-// Seats ride the rim, so the name plate hanging below the avatar overhangs the
-// felt. The table has to be sized to leave room for it above the action bar.
-const SEAT_BELOW_ANCHOR = 58;
+// The play area starts this far below the safe-area top: clear of the header
+// row and the pot number, which sit inside the notch-safe area. Measuring from
+// the raw screen top is what put a seat on top of the pot on a notched iPhone.
+const POT_CLEARANCE = 72;
+const ARC_GLOW_HEIGHT = 220;
 const BUY_IN_BLINDS = 100;
 
 const STAGE_LABEL: Record<string, string> = {
@@ -59,9 +50,23 @@ export default function TableScreen() {
   });
 
   const { width: screenWidth } = useWindowDimensions();
-  const [feltBox, setFeltBox] = useState({ width: 0, height: 0 });
+  const insets = useSafeAreaInsets();
+  const [screen, setScreen] = useState({ width: 0, height: 0 });
   const [raiseAmount, setRaiseAmount] = useState(0);
   const [now, setNow] = useState(Date.now());
+
+  // The game happens from just under the pot to the bottom of the screen. The
+  // action buttons float over the bottom of that, with no bar behind them.
+  const playTop = insets.top + POT_CLEARANCE;
+  const playHeight = Math.max(0, screen.height - playTop);
+  const reservedBottom = reservedBottomFor(insets.bottom);
+  const geo = useMemo(
+    () =>
+      screen.width > 0 && playHeight > reservedBottom
+        ? tableGeometry(screen.width, playHeight, reservedBottom)
+        : null,
+    [screen.width, playHeight, reservedBottom]
+  );
 
   // Portrait only: the layout assumes a tall table with the viewer at the foot.
   useEffect(() => {
@@ -71,7 +76,7 @@ export default function TableScreen() {
     };
   }, []);
 
-  // Drives the countdown ring. Only ticks while somebody is on the clock.
+  // Drives the countdowns. Only ticks while somebody is on the clock.
   const deadline = snapshot?.deadline ?? null;
   useEffect(() => {
     if (!deadline) return;
@@ -83,6 +88,9 @@ export default function TableScreen() {
   const mySeat = snapshot?.you.seatIndex ?? null;
   const isMyTurn = Boolean(hand && hand.toAct === userId);
   const bounds = isMyTurn ? hand?.raiseBounds ?? null : null;
+  const me = hand?.players.find(p => p.userId === userId) ?? null;
+  const totalMs = snapshot?.actionTimeoutMs ?? 30000;
+  const remainingMs = deadline ? Math.max(0, deadline - now) : null;
 
   // Reset the slider to the minimum legal raise each time the turn comes round.
   const boundsKey = bounds ? `${bounds.min}-${bounds.max}` : 'none';
@@ -122,35 +130,48 @@ export default function TableScreen() {
   }, [focusSeat, snapshot, mySeat]);
 
   const slots = useMemo(
-    () => carouselPositions(snapshot?.maxSeats ?? 6, mySeat, effectiveFocus),
-    [snapshot?.maxSeats, mySeat, effectiveFocus]
+    () => (geo ? carouselPositions(snapshot?.maxSeats ?? 6, mySeat, effectiveFocus, geo) : []),
+    [snapshot?.maxSeats, mySeat, effectiveFocus, geo]
+  );
+  const heroSlot = slots.find(s => s.isHero) ?? null;
+
+  const board = useMemo(
+    () => (geo ? boardCentre(geo, mySeat !== null) : { x: 0, y: 0 }),
+    [geo, mySeat]
   );
 
-  const slotBySeat = useMemo(() => {
-    const map = new Map<number, CarouselSlot>();
-    for (const slot of slots) map.set(slot.seatIndex, slot);
-    return map;
-  }, [slots]);
+  // Opponents on the ring: every seat but the viewer's.
+  const ringSize = (snapshot?.maxSeats ?? 6) - 1;
+  // Re-measuring the play area moves every pixel position. That must snap, not
+  // animate, or seats would fly in from the corner on launch.
+  const layoutKey = `${screen.width}x${playHeight}`;
 
-  const remaining = useMemo(() => {
-    if (!deadline || !snapshot) return null;
-    return Math.max(0, Math.min(1, (deadline - now) / snapshot.actionTimeoutMs));
-  }, [deadline, now, snapshot]);
+  const nameOf = (id: string) => snapshot?.seats.find(s => s?.userId === id)?.name ?? 'Player';
 
   const announcement = useMemo(() => {
     if (!hand) return null;
     if (hand.winners?.length) {
       return hand.winners
         .map(w => {
-          const seat = snapshot?.seats.find(s => s?.userId === w.userId);
-          return `${seat?.name ?? w.userId} wins ${formatChips(w.amount)}`;
+          if (w.userId === userId) return `You win ${formatChips(w.amount)}`;
+          const name = snapshot?.seats.find(s => s?.userId === w.userId)?.name ?? 'Player';
+          return `${name} wins ${formatChips(w.amount)}`;
         })
         .join('   ·   ');
     }
     return STAGE_LABEL[hand.stage] ?? null;
-  }, [hand, snapshot]);
+  }, [hand, snapshot, userId]);
 
-  const myStack = mySeat !== null ? snapshot?.seats[mySeat]?.stack ?? null : null;
+  // Replaces the buttons whenever it isn't your turn.
+  const statusText =
+    mySeat === null
+      ? 'Tap an open seat to join'
+      : hand?.toAct
+        ? `Waiting for ${nameOf(hand.toAct)}…`
+        : null;
+
+  const myStack = mySeat !== null ? me?.stack ?? snapshot?.seats[mySeat]?.stack ?? 0 : 0;
+  const mySittingOut = mySeat !== null && Boolean(snapshot?.seats[mySeat]?.sittingOut);
 
   const handleSit = (seatIndex: number) => {
     if (!snapshot || mySeat !== null) return;
@@ -166,153 +187,215 @@ export default function TableScreen() {
         style={StyleSheet.absoluteFill}
       />
 
-      <View style={styles.glowWrap} pointerEvents="none">
-        <PotGlow width={screenWidth} height={GLOW_HEIGHT} />
+      {/* The violet light behind the pot, spilling down onto the table's arc. */}
+      <View
+        style={[styles.glowWrap, { height: playTop + 120 }]}
+        pointerEvents="none">
+        <PotGlow width={screenWidth} height={playTop + 120} />
       </View>
 
-      {/* The felt owns the whole screen; the header and action bar float over
-          it, which is what lets the table stay large on a phone. */}
       <View
         style={styles.arena}
         onLayout={e => {
           const { width, height } = e.nativeEvent.layout;
-          // Seats straddle the rim, so half a seat widget overhangs each side.
-          const maxW = width - SEAT_W;
-          const maxH = height - HEADER_SPACE - ACTION_BAR_SPACE - SEAT_BELOW_ANCHOR;
-          let w = Math.min(maxW, maxH * TABLE_ASPECT);
-          let h = w / TABLE_ASPECT;
-          if (h > maxH) {
-            h = maxH;
-            w = h * TABLE_ASPECT;
-          }
-          setFeltBox({ width: w, height: h });
+          setScreen({ width, height });
         }}>
-        <View style={[styles.feltBox, { width: feltBox.width, height: feltBox.height }]}>
-          <TableFelt width={feltBox.width} height={feltBox.height} />
+        {geo && (
+          // A true circle, deliberately wider than the phone: only its top arc
+          // shows, and the rest runs off the sides and past the bottom.
+          <View
+            pointerEvents="none"
+            style={[
+              styles.felt,
+              {
+                left: geo.centreX - geo.radius,
+                top: playTop + geo.centreY - geo.radius,
+                width: geo.radius * 2,
+                height: geo.radius * 2
+              }
+            ]}>
+            <TableFelt width={geo.radius * 2} height={geo.radius * 2} />
+          </View>
+        )}
 
-          <View style={styles.centre} pointerEvents="none">
-            <View style={styles.community}>
-              {(hand?.community ?? []).map((card, i) => (
-                <PlayingCard
-                  key={`${i}-${card}`}
-                  card={card}
-                  width={CardSize.community.w}
-                  height={CardSize.community.h}
-                />
-              ))}
+        {geo && (
+          // Where the pot's light lands: a bloom on the top of the arc.
+          <View
+            pointerEvents="none"
+            style={[
+              styles.arcGlow,
+              {
+                top: playTop + geo.centreY - geo.radius - ARC_GLOW_HEIGHT / 2,
+                height: ARC_GLOW_HEIGHT
+              }
+            ]}>
+            <ArcGlow width={screen.width} height={ARC_GLOW_HEIGHT} />
+          </View>
+        )}
+
+        {geo && (
+          // Seats, cards and the bank are placed in the visible play area, not
+          // on the felt, because most of the felt is off screen.
+          <View style={[styles.play, { top: playTop, height: playHeight }]} pointerEvents="box-none">
+            <View
+              style={[styles.board, { top: board.y - CardSize.community.h / 2 }]}
+              pointerEvents="none">
+              {/* Always five positions, fanned slightly: dealt cards fill in,
+                  the rest stay as dashed outlines. */}
+              <View style={styles.community}>
+                {Array.from({ length: 5 }).map((_, i) => {
+                  const card = hand?.community?.[i];
+                  const offset = i - 2;
+                  return (
+                    <View key={i} style={{ transform: [{ translateY: offset * offset * 2 }] }}>
+                      <PlayingCard
+                        card={card}
+                        slot={!card}
+                        width={CardSize.community.w}
+                        height={CardSize.community.h}
+                        tilt={offset * 5}
+                      />
+                    </View>
+                  );
+                })}
+              </View>
+
+              {announcement && (
+                <View style={styles.announcement}>
+                  <Text style={styles.announcementText}>{announcement}</Text>
+                </View>
+              )}
             </View>
 
-            {announcement && (
-              <View style={styles.announcement}>
-                <Text style={styles.announcementText}>{announcement}</Text>
+            {slots.map(slot => {
+              if (slot.isHero) return null;
+              const seatIndex = slot.seatIndex;
+              const seat = snapshot?.seats[seatIndex] ?? null;
+              const player = hand?.players.find(p => p.seatIndex === seatIndex);
+              const isToAct = Boolean(hand && player && hand.toAct === player.userId);
+
+              return (
+                <CarouselItem
+                  key={seatIndex}
+                  left={slot.x - SEAT_WIDTH / 2}
+                  top={slot.y - SEAT_ANCHOR_Y}
+                  scale={slot.scale}
+                  opacity={slot.opacity}
+                  slot={slot.slot}
+                  ringSize={ringSize}
+                  layoutKey={layoutKey}
+                  style={styles.seat}>
+                  <Seat
+                    seat={seat}
+                    player={player}
+                    isToAct={isToAct}
+                    isDealer={snapshot?.dealerSeat === seatIndex}
+                    remainingMs={isToAct ? remainingMs : null}
+                    totalMs={totalMs}
+                    revealed={hand?.stage === 'complete' && Boolean(player) && !player!.folded}
+                    canSit={mySeat === null}
+                    onSit={() => handleSit(seatIndex)}
+                  />
+                </CarouselItem>
+              );
+            })}
+
+            {heroSlot &&
+              (me && me.holeCards.length === 2 ? (
+                <View
+                  style={[
+                    styles.hero,
+                    {
+                      left: heroSlot.x - HERO_HAND_WIDTH / 2,
+                      top: heroSlot.y - HERO_HAND_HEIGHT / 2
+                    }
+                  ]}
+                  pointerEvents="none">
+                  <HeroHand cards={me.holeCards} dimmed={me.folded} />
+                </View>
+              ) : mySittingOut ? (
+                // You have no avatar or pill in this design, so this is the only
+                // place being sat out shows -- and the way back in, since the
+                // header gear sits under Expo Go's own button during development.
+                <Pressable
+                  style={[styles.heroSitOut, { top: heroSlot.y - 22 }]}
+                  onPress={() => sitOut(false)}
+                  hitSlop={10}>
+                  <Text style={styles.heroWaitingText}>You’re sitting out</Text>
+                  <Text style={styles.heroBack}>Tap to play</Text>
+                </Pressable>
+              ) : (
+                <Text style={[styles.heroWaiting, styles.heroWaitingText, { top: heroSlot.y - 9 }]}>
+                  {hand ? 'You’re in from the next hand' : 'Waiting for the next hand'}
+                </Text>
+              ))}
+
+            {mySeat !== null && (
+              <View style={[styles.bank, { bottom: reservedBottom + 4 }]} pointerEvents="none">
+                <BankPanel
+                  stack={myStack}
+                  bet={me?.betThisRound ?? 0}
+                  isDealer={snapshot?.dealerSeat === mySeat}
+                  allIn={me?.allIn ?? false}
+                  isMyTurn={isMyTurn}
+                  remainingMs={isMyTurn ? remainingMs : null}
+                  totalMs={totalMs}
+                />
               </View>
             )}
           </View>
-
-          {/* Each player's chips, pulled off their seat toward the pot. */}
-          {hand?.players.map(player => {
-            if (!player.betThisRound) return null;
-            const seatPos = slotBySeat.get(player.seatIndex);
-            if (!seatPos || seatPos.opacity === 0) return null;
-            const bet = betPosition(seatPos);
-            return (
-              <View
-                key={`bet-${player.userId}`}
-                style={[
-                  styles.bet,
-                  { left: bet.x * feltBox.width - 40, top: bet.y * feltBox.height - 12 }
-                ]}
-                pointerEvents="none">
-                <ChipAmount amount={player.betThisRound} size={15} />
-              </View>
-            );
-          })}
-
-          {slots.map(slot => {
-            const seatIndex = slot.seatIndex;
-            const seat = snapshot?.seats[seatIndex] ?? null;
-            const player = hand?.players.find(p => p.seatIndex === seatIndex);
-            const isViewer = seat?.userId === userId;
-            const revealed =
-              isViewer || (hand?.stage === 'complete' && Boolean(player) && !player!.folded);
-
-            return (
-              <View
-                key={seatIndex}
-                pointerEvents={slot.opacity === 0 ? 'none' : 'auto'}
-                style={[
-                  styles.seat,
-                  {
-                    left: slot.x * feltBox.width - SEAT_W / 2,
-                    top: slot.y * feltBox.height - SEAT_ANCHOR_Y,
-                    opacity: slot.opacity,
-                    transform: [{ scale: slot.scale }]
-                  }
-                ]}>
-                <Seat
-                  seat={seat}
-                  player={player}
-                  isViewer={isViewer}
-                  isToAct={Boolean(hand && player && hand.toAct === player.userId)}
-                  isDealer={snapshot?.dealerSeat === seatIndex}
-                  remaining={hand?.toAct === player?.userId ? remaining : null}
-                  revealed={revealed}
-                  onSit={() => handleSit(seatIndex)}
-                />
-              </View>
-            );
-          })}
-        </View>
+        )}
       </View>
 
       <SafeAreaView style={styles.headerWrap} edges={['top', 'left', 'right']} pointerEvents="box-none">
         <View style={styles.header} pointerEvents="box-none">
-          <Pressable style={styles.roundButton} hitSlop={8}>
-            <Text style={styles.backArrow}>←</Text>
+          <Pressable style={styles.menu} hitSlop={8}>
+            <View style={styles.menuBar} />
+            <View style={styles.menuBar} />
+            <View style={styles.menuBar} />
           </Pressable>
-          <View style={styles.mark} />
-          <Text style={styles.headerTitle}>LOBBY</Text>
+          <View>
+            <Text style={styles.headerTitle}>Games</Text>
+            {status !== 'connected' ? (
+              <Text style={styles.connection}>
+                {status === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
+              </Text>
+            ) : (
+              snapshot && (
+                <Text style={styles.blinds}>
+                  Blinds {formatChips(snapshot.smallBlind)}/{formatChips(snapshot.bigBlind)}
+                </Text>
+              )
+            )}
+          </View>
 
-          {/* The pot is the single biggest thing on the table (12.2). */}
+          {/* The pot is the single biggest number on the screen. */}
           <View style={styles.headerCentre} pointerEvents="none">
             <Text style={styles.potLabel}>Pot</Text>
             <Text style={styles.potValue}>{formatChips(hand?.pot ?? 0)}</Text>
           </View>
 
           <View style={styles.headerRight}>
-            {status !== 'connected' && (
-              <Text style={styles.status}>
-                {status === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
-              </Text>
-            )}
-            {snapshot && (
-              <Text style={styles.blinds}>
-                {formatChips(snapshot.smallBlind)}/{formatChips(snapshot.bigBlind)}
-              </Text>
-            )}
-            {myStack !== null && (
-              <View style={styles.bank}>
-                <View style={styles.coin} />
-                <Text style={styles.bankText}>{formatChips(myStack)}</Text>
-              </View>
-            )}
             <Pressable
-              style={styles.roundButton}
+              style={styles.iconButton}
               hitSlop={8}
               onPress={() => snapshot && sitOut(!snapshot.seats[mySeat ?? -1]?.sittingOut)}>
               <Text style={styles.gear}>⚙</Text>
+            </Pressable>
+            <Pressable style={[styles.iconButton, styles.help]} hitSlop={8}>
+              <Text style={styles.helpText}>?</Text>
             </Pressable>
           </View>
         </View>
       </SafeAreaView>
 
       {error && (
-        <Pressable style={styles.error} onPress={clearError}>
+        <Pressable style={[styles.error, { bottom: reservedBottom + 12 }]} onPress={clearError}>
           <Text style={styles.errorText}>{error}</Text>
         </Pressable>
       )}
 
-      <View style={styles.actionBarWrap}>
+      <View style={styles.actionBarWrap} pointerEvents="box-none">
         <ActionBar
           hand={hand}
           viewerId={userId}
@@ -321,6 +404,8 @@ export default function TableScreen() {
           raiseAmount={raiseAmount}
           onChangeRaise={setRaiseAmount}
           onAct={(action: Action, amount?: number) => act(action, amount)}
+          statusText={statusText}
+          bottomInset={insets.bottom}
         />
       </View>
     </View>
@@ -329,96 +414,68 @@ export default function TableScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Felt.woodBottom },
-  arena: {
-    ...StyleSheet.absoluteFill,
-    paddingTop: HEADER_SPACE,
-    paddingBottom: ACTION_BAR_SPACE + SEAT_BELOW_ANCHOR,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  glowWrap: { position: 'absolute', top: 0, left: 0, right: 0, height: GLOW_HEIGHT },
-  headerWrap: { position: 'absolute', top: 0, left: 0, right: 0 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 5
-  },
-  headerTitle: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowRadius: 4
-  },
-  mark: {
-    width: 14,
-    height: 14,
-    borderRadius: 5,
-    backgroundColor: Palette.accent
-  },
-  headerCentre: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    alignItems: 'center'
-  },
-  potLabel: {
-    color: Palette.textDim,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.6,
-    textTransform: 'uppercase'
-  },
-  potValue: {
-    color: Palette.text,
-    fontSize: 34,
-    fontWeight: '300',
-    letterSpacing: -0.5,
-    marginTop: -2
-  },
-  bank: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  coin: { width: 11, height: 11, borderRadius: 6, backgroundColor: Palette.gold },
-  bankText: { color: Palette.text, fontSize: 13, fontWeight: '700' },
-  headerRight: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 10 },
-  status: { color: Palette.danger, fontSize: 11, fontWeight: '700' },
-  blinds: { color: Palette.textDim, fontSize: 12, fontWeight: '700' },
-  roundButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  backArrow: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  gear: { color: '#fff', fontSize: 14 },
-  feltBox: { position: 'relative' },
-  centre: {
-    ...StyleSheet.absoluteFill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7
-  },
+  glowWrap: { position: 'absolute', top: 0, left: 0, right: 0 },
+  arena: { ...StyleSheet.absoluteFill },
+  felt: { position: 'absolute' },
+  arcGlow: { position: 'absolute', left: 0, right: 0 },
+  play: { position: 'absolute', left: 0, right: 0 },
+  board: { position: 'absolute', left: 0, right: 0, alignItems: 'center', gap: 16 },
+  community: { flexDirection: 'row', gap: 6, minHeight: CardSize.community.h },
   announcement: {
-    backgroundColor: 'rgba(6,10,8,0.62)',
+    backgroundColor: 'rgba(20,17,29,0.7)',
     paddingHorizontal: 12,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(34,209,138,0.35)'
+    borderColor: 'rgba(127,90,240,0.35)'
   },
-  announcementText: { color: Palette.accent, fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
-  community: { flexDirection: 'row', gap: 5, minHeight: CardSize.community.h },
-  bet: { position: 'absolute', width: 80, alignItems: 'center' },
-  seat: { position: 'absolute', width: SEAT_W, height: SEAT_H, alignItems: 'center' },
+  announcementText: { color: '#b9a3ff', fontSize: 12, fontWeight: '700', letterSpacing: 0.3 },
+  // Seats ride the carousel: pinned at the play area's top-left corner and
+  // placed entirely by transforms, which the native driver can animate.
+  seat: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: SEAT_WIDTH,
+    height: SEAT_HEIGHT,
+    alignItems: 'center'
+  },
+  hero: { position: 'absolute' },
+  heroWaiting: { position: 'absolute', left: 0, right: 0, textAlign: 'center' },
+  heroWaitingText: { color: Palette.textMuted, fontSize: 13, fontWeight: '600' },
+  heroSitOut: { position: 'absolute', left: 0, right: 0, alignItems: 'center', gap: 3 },
+  heroBack: { color: Palette.accent, fontSize: 15, fontWeight: '800' },
+  bank: { position: 'absolute', right: 16 },
+  headerWrap: { position: 'absolute', top: 0, left: 0, right: 0 },
+  header: {
+    height: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16
+  },
+  menu: { width: 22, gap: 4, paddingVertical: 4 },
+  menuBar: { height: 2, borderRadius: 1, backgroundColor: Palette.text },
+  headerTitle: { color: Palette.text, fontSize: 15, fontWeight: '600' },
+  blinds: { color: Palette.textMuted, fontSize: 11, fontWeight: '600', marginTop: 1 },
+  connection: { color: Palette.danger, fontSize: 11, fontWeight: '700', marginTop: 1 },
+  headerCentre: { position: 'absolute', left: 0, right: 0, top: 2, alignItems: 'center' },
+  potLabel: { color: Palette.textDim, fontSize: 12, fontWeight: '600' },
+  potValue: {
+    color: Palette.text,
+    fontSize: 40,
+    lineHeight: 46,
+    fontWeight: '800',
+    letterSpacing: -1
+  },
+  headerRight: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 14 },
+  iconButton: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
+  gear: { color: Palette.text, fontSize: 20 },
+  help: { borderRadius: 13, borderWidth: 1.8, borderColor: Palette.text },
+  helpText: { color: Palette.text, fontSize: 14, fontWeight: '800', marginTop: -1 },
   actionBarWrap: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   error: {
     position: 'absolute',
-    bottom: ACTION_BAR_SPACE + 14,
     alignSelf: 'center',
     backgroundColor: 'rgba(224,90,78,0.92)',
     paddingHorizontal: 14,

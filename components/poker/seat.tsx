@@ -1,135 +1,178 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
+import { Chip } from '@/components/poker/chip-amount';
 import { PlayingCard } from '@/components/poker/playing-card';
-import { CardSize, Palette, Ring } from '@/constants/poker-theme';
+import {
+  AvatarGradients,
+  CardSize,
+  CLOCK_CRITICAL_MS,
+  Palette,
+  Ring,
+  Status
+} from '@/constants/poker-theme';
 import { formatChips, type HandPlayerView, type SeatView } from '@/lib/poker';
 
-const AVATAR = 42;
+export const AVATAR = 64;
 const RING_WIDTH = 3;
+const RING_BOX = AVATAR + RING_WIDTH * 2 + 4;
+const PILL_HEIGHT = 18;
+const PILL_GAP = 4;
 
-const AVATAR_COLORS = ['#4A6FA5', '#8E5A9E', '#3E8E7E', '#B5713F', '#96566B', '#5B7A3E'];
+/** Width of the seat widget, and how far down it the avatar's centre sits. */
+export const SEAT_WIDTH = 108;
+export const SEAT_HEIGHT = 156;
+export const SEAT_ANCHOR_Y = PILL_HEIGHT + PILL_GAP + RING_BOX / 2;
 
 function initials(name: string) {
   const parts = name.trim().split(/\s+/).slice(0, 2);
   return parts.map(p => p[0]?.toUpperCase() ?? '').join('') || '?';
 }
 
-function avatarColor(userId: string) {
+function avatarGradient(userId: string) {
   let hash = 0;
   for (let i = 0; i < userId.length; i++) hash = (hash * 31 + userId.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+  return AvatarGradients[hash % AvatarGradients.length];
 }
 
 interface Props {
   seat: SeatView | null;
   player?: HandPlayerView;
-  isViewer: boolean;
   isToAct: boolean;
   isDealer: boolean;
-  /** 1 -> full clock remaining, 0 -> expired. Null when this seat is not on the clock. */
-  remaining: number | null;
-  /** Cards face-up: the viewer's own, or anyone still live at showdown. */
+  /** Time left on this seat's action clock. Null when it isn't on the clock. */
+  remainingMs: number | null;
+  totalMs: number;
+  /** Showdown: this player's cards are face-up. */
   revealed: boolean;
+  /** Empty chairs are tappable only before you have a seat. */
+  canSit: boolean;
   onSit?: () => void;
 }
 
+/**
+ * An opponent around the table: status pill, avatar, then name, stack and
+ * current bet as plain text. Your own seat is drawn differently (your cards and
+ * the bank panel), so this component never renders the viewer.
+ */
 export function Seat({
   seat,
   player,
-  isViewer,
   isToAct,
   isDealer,
-  remaining,
+  remainingMs,
+  totalMs,
   revealed,
+  canSit,
   onSit
 }: Props) {
   if (!seat) {
     return (
-      <Pressable style={styles.empty} onPress={onSit} hitSlop={6}>
-        <Text style={styles.emptyChevron}>▾</Text>
-        <Text style={styles.emptyLabel}>SIT HERE</Text>
-      </Pressable>
+      <View style={styles.wrap}>
+        <View style={styles.pillSpace} />
+        <Pressable
+          style={[styles.empty, !canSit && styles.emptyClosed]}
+          onPress={onSit}
+          disabled={!canSit}
+          hitSlop={6}>
+          <Text style={styles.emptyPlus}>{canSit ? '+' : ''}</Text>
+          <Text style={styles.emptyLabel}>{canSit ? 'Sit here' : 'Open'}</Text>
+        </Pressable>
+      </View>
     );
   }
 
   const folded = player?.folded ?? false;
   const allIn = player?.allIn ?? false;
-  const inHand = Boolean(player);
+  const away = seat.sittingOut || !seat.connected;
 
-  let ringColor = Ring.idle;
-  if (folded) ringColor = Ring.folded;
-  else if (allIn) ringColor = Ring.allIn;
-  else if (isToAct && remaining !== null) {
-    ringColor = remaining > 0.5 ? Ring.acting : remaining > 0.2 ? Ring.warning : Ring.critical;
-  }
+  // No pill for someone who is seated but waiting for the next hand.
+  const status = player
+    ? folded
+      ? Status.out
+      : allIn
+        ? Status.allIn
+        : Status.in
+    : away
+      ? Status.away
+      : null;
 
-  const badge = allIn
-    ? { label: 'ALL IN', color: Palette.allIn }
-    : folded
-      ? { label: 'FOLD', color: Palette.folded }
-      : seat.sittingOut
-        ? { label: 'AWAY', color: Palette.folded }
-        : null;
+  const onClock = isToAct && remainingMs !== null;
+  const fraction = onClock ? Math.max(0, Math.min(1, remainingMs / totalMs)) : 0;
+  const ringColor = !onClock
+    ? 'transparent'
+    : remainingMs <= CLOCK_CRITICAL_MS
+      ? Ring.critical
+      : fraction > 0.5
+        ? Ring.acting
+        : Ring.warning;
 
-  const size = AVATAR + RING_WIDTH * 2 + 4;
-  const radius = (size - RING_WIDTH) / 2 - 1;
+  const radius = (RING_BOX - RING_WIDTH) / 2 - 1;
   const circumference = 2 * Math.PI * radius;
+  const [from, to] = avatarGradient(seat.userId);
+  const showCards = revealed && player && player.holeCards.length === 2;
 
   return (
     <View style={styles.wrap}>
-      {inHand && (
-        // The viewer's own cards are dealt larger — they are the ones you read.
-        <View style={[styles.cards, isViewer && styles.cardsViewer]} pointerEvents="none">
-          {[0, 1].map(i => (
-            <PlayingCard
-              key={i}
-              card={revealed ? player!.holeCards[i] : undefined}
-              width={isViewer ? CardSize.hero.w : CardSize.seat.w}
-              height={isViewer ? CardSize.hero.h : CardSize.seat.h}
-              tilt={i === 0 ? -8 : 8}
-              dimmed={folded}
-            />
-          ))}
+      {status ? (
+        <View style={[styles.pill, { backgroundColor: status.bg }]}>
+          <Text style={[styles.pillText, { color: status.fg }]}>{status.label}</Text>
         </View>
+      ) : (
+        <View style={styles.pillSpace} />
       )}
 
-      <View style={{ width: size, height: size }}>
-        <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke={isToAct && remaining !== null ? 'rgba(255,255,255,0.14)' : ringColor}
-            strokeWidth={RING_WIDTH}
-            fill="none"
-          />
-          {isToAct && remaining !== null && (
-            // Drains clockwise from the top as the action clock runs down.
+      <View style={styles.ringBox}>
+        {onClock && (
+          <Svg width={RING_BOX} height={RING_BOX} style={StyleSheet.absoluteFill}>
             <Circle
-              cx={size / 2}
-              cy={size / 2}
+              cx={RING_BOX / 2}
+              cy={RING_BOX / 2}
+              r={radius}
+              stroke="rgba(255,255,255,0.12)"
+              strokeWidth={RING_WIDTH}
+              fill="none"
+            />
+            {/* Drains clockwise from the top as the action clock runs down. */}
+            <Circle
+              cx={RING_BOX / 2}
+              cy={RING_BOX / 2}
               r={radius}
               stroke={ringColor}
               strokeWidth={RING_WIDTH}
               fill="none"
               strokeLinecap="round"
-              strokeDasharray={`${circumference * Math.max(0, remaining)} ${circumference}`}
-              transform={`rotate(-90 ${size / 2} ${size / 2})`}
+              strokeDasharray={`${circumference * fraction} ${circumference}`}
+              transform={`rotate(-90 ${RING_BOX / 2} ${RING_BOX / 2})`}
             />
-          )}
-        </Svg>
+          </Svg>
+        )}
 
-        <View
-          style={[
-            styles.avatar,
-            {
-              backgroundColor: avatarColor(seat.userId),
-              opacity: folded || seat.sittingOut ? 0.45 : 1
-            }
-          ]}>
+        <View style={[styles.avatar, (folded || away) && styles.avatarDimmed]}>
+          <LinearGradient
+            colors={[from, to]}
+            start={{ x: 0.2, y: 0 }}
+            end={{ x: 0.8, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
           <Text style={styles.initials}>{initials(seat.name)}</Text>
         </View>
+
+        {showCards && (
+          // Showdown only: the two cards fan over the lower half of the avatar.
+          <View style={styles.cards} pointerEvents="none">
+            {[0, 1].map(i => (
+              <PlayingCard
+                key={i}
+                card={player!.holeCards[i]}
+                width={CardSize.seat.w}
+                height={CardSize.seat.h}
+                tilt={i === 0 ? -8 : 8}
+              />
+            ))}
+          </View>
+        )}
 
         {!seat.connected && <View style={styles.offline} />}
         {isDealer && (
@@ -139,105 +182,110 @@ export function Seat({
         )}
       </View>
 
-      {badge && (
-        <View style={[styles.badge, { backgroundColor: badge.color }]}>
-          <Text style={styles.badgeText}>{badge.label}</Text>
+      <Text style={[styles.name, (folded || away) && styles.textDimmed]} numberOfLines={1}>
+        {seat.name}
+      </Text>
+      <Text style={styles.stack}>{formatChips(player?.stack ?? seat.stack)}</Text>
+      {player && player.betThisRound > 0 && (
+        <View style={styles.bet}>
+          <Chip size={12} color="#2a2338" />
+          <Text style={styles.betText}>{formatChips(player.betThisRound)}</Text>
         </View>
       )}
-
-      {/* Name and stack share one plate: a separate name line makes the seat
-          too tall for the top and bottom positions on a phone in landscape. */}
-      <View style={[styles.plate, isViewer && styles.plateViewer]}>
-        <Text style={styles.name} numberOfLines={1}>
-          {isViewer ? 'You' : seat.name}
-        </Text>
-        <Text style={styles.stackText}>{formatChips(player?.stack ?? seat.stack)}</Text>
-      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { alignItems: 'center', width: 88 },
-  cards: {
-    position: 'absolute',
-    top: -6,
-    flexDirection: 'row',
-    gap: -8,
-    zIndex: -1
+  wrap: { alignItems: 'center', width: SEAT_WIDTH, height: SEAT_HEIGHT },
+  pillSpace: { height: PILL_HEIGHT + PILL_GAP },
+  pill: {
+    height: PILL_HEIGHT,
+    marginBottom: PILL_GAP,
+    paddingHorizontal: 9,
+    borderRadius: PILL_HEIGHT / 2,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
-  // The viewer's own cards sit beside the avatar rather than behind it, so
-  // they stay readable — this is the one hand you actually need to read.
-  cardsViewer: { top: -12, left: 56, gap: -12, zIndex: 3 },
+  pillText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
+  ringBox: {
+    width: RING_BOX,
+    height: RING_BOX,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
   avatar: {
-    position: 'absolute',
-    top: RING_WIDTH + 2,
-    left: RING_WIDTH + 2,
     width: AVATAR,
     height: AVATAR,
     borderRadius: AVATAR / 2,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center'
   },
-  initials: { color: '#fff', fontWeight: '800', fontSize: 15, letterSpacing: 0.4 },
+  avatarDimmed: { opacity: 0.45 },
+  initials: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 22,
+    letterSpacing: 0.5,
+    textShadowColor: 'rgba(0,0,0,0.25)',
+    textShadowRadius: 3
+  },
+  cards: {
+    position: 'absolute',
+    bottom: -6,
+    flexDirection: 'row',
+    gap: -10
+  },
   offline: {
     position: 'absolute',
-    right: 2,
-    top: 2,
-    width: 11,
-    height: 11,
+    right: 6,
+    top: 6,
+    width: 12,
+    height: 12,
     borderRadius: 6,
     backgroundColor: '#8A9299',
     borderWidth: 2,
-    borderColor: '#0A1A14'
+    borderColor: Palette.bar
   },
   dealer: {
     position: 'absolute',
-    right: -8,
+    right: 0,
     bottom: 2,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: Palette.dealer,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Palette.gold,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.85)'
+    borderWidth: 2,
+    borderColor: Palette.bar
   },
-  dealerText: { color: '#fff', fontSize: 11, fontWeight: '900' },
-  badge: {
-    marginTop: -8,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-    zIndex: 2
+  dealerText: { color: '#3a2a05', fontSize: 11, fontWeight: '900' },
+  name: {
+    marginTop: 4,
+    color: Palette.text,
+    fontSize: 15,
+    fontWeight: '700',
+    maxWidth: SEAT_WIDTH
   },
-  badgeText: { color: '#fff', fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
-  plate: {
-    marginTop: -4,
-    minWidth: 62,
-    maxWidth: 88,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 8,
-    backgroundColor: Palette.pill,
-    borderWidth: 1,
-    borderColor: Palette.pillBorder,
-    alignItems: 'center'
-  },
-  plateViewer: { borderColor: 'rgba(34,209,138,0.55)' },
-  stackText: { color: Palette.text, fontWeight: '800', fontSize: 11, lineHeight: 13 },
-  name: { color: Palette.textDim, fontSize: 9, fontWeight: '600', lineHeight: 11 },
+  stack: { marginTop: 1, color: Palette.textDim, fontSize: 13, fontWeight: '600' },
+  textDimmed: { opacity: 0.6 },
+  bet: { marginTop: 3, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  betText: { color: Palette.gold, fontSize: 12, fontWeight: '800' },
   empty: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: AVATAR,
+    height: AVATAR,
+    marginTop: (RING_BOX - AVATAR) / 2,
+    borderRadius: AVATAR / 2,
     borderWidth: 1.5,
-    borderColor: Palette.seatEmpty,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderStyle: 'dashed',
+    borderColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
     alignItems: 'center',
     justifyContent: 'center'
   },
-  emptyChevron: { color: 'rgba(255,255,255,0.55)', fontSize: 16, marginBottom: -4 },
-  emptyLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 8, fontWeight: '800', letterSpacing: 0.6 }
+  emptyClosed: { borderColor: 'rgba(255,255,255,0.12)' },
+  emptyPlus: { color: 'rgba(255,255,255,0.7)', fontSize: 20, fontWeight: '300', marginTop: -4 },
+  emptyLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 10, fontWeight: '700' }
 });

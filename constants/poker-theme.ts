@@ -59,16 +59,37 @@ export const Ring = {
   folded: 'rgba(255,255,255,0.06)'
 };
 
+// Portrait has width to spare across five community cards, so they are a
+// little larger than the landscape sizes these started at. Your own two cards
+// are the biggest thing on the table, as in the design: about 1.7x the board.
+// Opponents' cards only ever show face-up at showdown, small, over the avatar.
 export const CardSize = {
-  community: { w: 40, h: 56 },
-  hero: { w: 48, h: 66 },
-  seat: { w: 22, h: 30 }
+  community: { w: 44, h: 62 },
+  hero: { w: 76, h: 106 },
+  seat: { w: 30, h: 42 }
 };
 
-export const Layout = {
-  // Fraction of the felt box that the seat ellipse occupies.
-  seatRadiusX: 0.46,
-  seatRadiusY: 0.52,
-  avatar: 54,
-  actionBarHeight: 92
-};
+// The pill above each opponent's avatar. IN / OUT are the design's tags; ALL IN
+// and AWAY cover the two states it doesn't show.
+export const Status = {
+  in: { bg: '#1b5e3b', fg: '#7ef0ad', label: 'IN' },
+  out: { bg: '#b3262f', fg: '#ffe3e4', label: 'OUT' },
+  allIn: { bg: '#7a5a12', fg: '#ffd86b', label: 'ALL IN' },
+  away: { bg: '#3a3546', fg: 'rgba(255,255,255,0.72)', label: 'AWAY' }
+} as const;
+
+// Saturated two-tone discs behind each player's initials, standing in for the
+// design's illustrated portraits. Picked per player from their id, so a player
+// keeps the same colour all session.
+export const AvatarGradients = [
+  ['#ffb347', '#ef5a1f'],
+  ['#7d8bff', '#3e4fe0'],
+  ['#ff7a7a', '#d6304a'],
+  ['#b28bff', '#6d3fe0'],
+  ['#5ee0c6', '#1f9d8a'],
+  ['#ff8fd0', '#c73f8e']
+] as const;
+
+// The action clock turns red for its final stretch, in milliseconds rather
+// than as a fraction, so "hurry up" means the same thing whatever the timer.
+export const CLOCK_CRITICAL_MS = 5000;

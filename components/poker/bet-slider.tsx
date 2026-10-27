@@ -3,7 +3,7 @@ import { PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Palette } from '@/constants/poker-theme';
 
-const HANDLE = 42;
+const THUMB = 26;
 
 interface Props {
   min: number;
@@ -11,10 +11,10 @@ interface Props {
   step: number;
   value: number;
   onChange: (value: number) => void;
-  disabled?: boolean;
 }
 
-export function BetSlider({ min, max, step, value, onChange, disabled = false }: Props) {
+/** Raise sizing: violet track, gold thumb, quiet − and + to nudge by a big blind. */
+export function BetSlider({ min, max, step, value, onChange }: Props) {
   // The responder is created once, so it reads live values through refs rather
   // than being rebuilt on every drag frame.
   const live = useRef({ min, max, step, value, onChange, width: 0 });
@@ -49,28 +49,26 @@ export function BetSlider({ min, max, step, value, onChange, disabled = false }:
   };
 
   return (
-    <View style={[styles.row, disabled && styles.disabled]} pointerEvents={disabled ? 'none' : 'auto'}>
-      <Pressable style={styles.stepper} onPress={() => nudge(-1)} hitSlop={4}>
+    <View style={styles.row}>
+      <Pressable style={styles.stepper} onPress={() => nudge(-1)} hitSlop={8}>
         <Text style={styles.stepperText}>−</Text>
       </Pressable>
 
       <View
         style={styles.trackArea}
         onLayout={e => {
-          live.current.width = e.nativeEvent.layout.width - HANDLE;
+          live.current.width = e.nativeEvent.layout.width - THUMB;
         }}>
         <View style={styles.track} />
         <View style={[styles.trackFill, { width: `${fraction * 100}%` }]} />
         <View
-          style={[styles.handle, { left: `${fraction * 100}%` }]}
-          {...responder.panHandlers}>
-          <View style={styles.grip} />
-          <View style={styles.grip} />
-          <View style={styles.grip} />
-        </View>
+          style={[styles.thumb, { left: `${fraction * 100}%` }]}
+          hitSlop={12}
+          {...responder.panHandlers}
+        />
       </View>
 
-      <Pressable style={styles.stepper} onPress={() => nudge(1)} hitSlop={4}>
+      <Pressable style={styles.stepper} onPress={() => nudge(1)} hitSlop={8}>
         <Text style={styles.stepperText}>+</Text>
       </Pressable>
     </View>
@@ -78,44 +76,25 @@ export function BetSlider({ min, max, step, value, onChange, disabled = false }:
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
-  disabled: { opacity: 0.35 },
-  stepper: {
-    width: 46,
-    height: 46,
-    borderRadius: 8,
-    backgroundColor: Palette.barRaised,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  stepperText: { color: '#fff', fontSize: 24, fontWeight: '700', marginTop: -2 },
-  trackArea: { flex: 1, height: HANDLE, justifyContent: 'center' },
-  track: {
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.18)'
-  },
+  row: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 },
+  stepper: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
+  stepperText: { color: Palette.textDim, fontSize: 22, fontWeight: '400', marginTop: -2 },
+  trackArea: { flex: 1, height: THUMB + 12, justifyContent: 'center' },
+  track: { height: 4, borderRadius: 2, backgroundColor: 'rgba(127,90,240,0.25)' },
   trackFill: {
     position: 'absolute',
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: Palette.accentDeep
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Palette.accent
   },
-  handle: {
+  thumb: {
     position: 'absolute',
-    width: HANDLE,
-    height: HANDLE,
-    borderRadius: HANDLE / 2,
-    backgroundColor: Palette.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-    transform: [{ translateX: -HANDLE / 2 }],
-    shadowColor: '#000',
-    shadowOpacity: 0.5,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 5
-  },
-  grip: { width: 16, height: 2, borderRadius: 1, backgroundColor: 'rgba(0,40,25,0.55)' }
+    width: THUMB,
+    height: THUMB,
+    borderRadius: THUMB / 2,
+    backgroundColor: Palette.gold,
+    borderWidth: 3,
+    borderColor: '#14111d',
+    transform: [{ translateX: -THUMB / 2 }]
+  }
 });

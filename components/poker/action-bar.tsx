@@ -4,6 +4,19 @@ import { BetSlider } from '@/components/poker/bet-slider';
 import { Palette } from '@/constants/poker-theme';
 import { formatChips, type Action, type HandView } from '@/lib/poker';
 
+const SLIDER_HEIGHT = 44;
+const ACTIONS_HEIGHT = 52;
+const BOTTOM_GAP = 6;
+
+/**
+ * How much of the bottom of the screen the action area occupies. The slider
+ * row is reserved even when hidden, so your cards don't jump up and down as
+ * your turn comes and goes.
+ */
+export function reservedBottomFor(bottomInset: number) {
+  return bottomInset + BOTTOM_GAP + SLIDER_HEIGHT + ACTIONS_HEIGHT;
+}
+
 interface Props {
   hand: HandView | null;
   viewerId: string;
@@ -12,12 +25,16 @@ interface Props {
   raiseAmount: number;
   onChangeRaise: (value: number) => void;
   onAct: (action: Action, amount?: number) => void;
+  /** Shown in place of the buttons when it isn't your turn. */
+  statusText: string | null;
+  bottomInset: number;
 }
 
 /**
- * Buttons are driven entirely by hand.legalActions, so the UI physically
- * cannot offer a move the server would reject — including the under-raise
- * case, where raising is withheld after a short all-in.
+ * Flat text actions, as in the design: Fold red, Raise green, Check white.
+ * Only what hand.legalActions allows is shown at all -- disabled actions are
+ * hidden, not greyed -- so the UI cannot offer a move the server would reject,
+ * including raising after an under-raise all-in.
  */
 export function ActionBar({
   hand,
@@ -26,7 +43,9 @@ export function ActionBar({
   bigBlind,
   raiseAmount,
   onChangeRaise,
-  onAct
+  onAct,
+  statusText,
+  bottomInset
 }: Props) {
   const legal = isMyTurn && hand ? hand.legalActions : [];
   const bounds = isMyTurn ? hand?.raiseBounds ?? null : null;
@@ -35,144 +54,108 @@ export function ActionBar({
   const me = hand?.players.find(p => p.userId === viewerId);
   const toCall = isMyTurn && hand && me ? Math.max(0, hand.currentBet - me.betThisRound) : 0;
 
-  const canFold = legal.includes('fold');
-  const canCheck = legal.includes('check');
-  const canCall = legal.includes('call');
   const raiseVerb: Action | null = legal.includes('raise')
     ? 'raise'
     : legal.includes('bet')
       ? 'bet'
       : null;
-
-  const isAllInRaise = bounds ? raiseAmount >= bounds.max : false;
+  const canRaise = Boolean(raiseVerb && bounds);
+  const isAllIn = bounds ? raiseAmount >= bounds.max : false;
 
   return (
-    <View style={styles.bar}>
-      {/* Portrait is 414pt wide: buttons, amount box and slider cannot share
-          one row, so the slider gets its own line above them. */}
-      {bounds && (
-        <View style={styles.sliderRow}>
-          <View style={styles.amountBox}>
-            <Text style={styles.amountText}>{formatChips(raiseAmount)}</Text>
-          </View>
-
+    <View style={[styles.wrap, { paddingBottom: bottomInset + BOTTOM_GAP }]} pointerEvents="box-none">
+      <View style={styles.sliderRow} pointerEvents="box-none">
+        {canRaise && bounds && (
           <BetSlider
             min={bounds.min}
             max={bounds.max}
             step={bigBlind}
             value={raiseAmount}
             onChange={onChangeRaise}
-            disabled={false}
           />
-        </View>
-      )}
+        )}
+      </View>
 
-      <View style={styles.buttonRow}>
-      <ActionButton
-        label="FOLD"
-        glyph="✕"
-        tone="fold"
-        enabled={canFold}
-        onPress={() => onAct('fold')}
-      />
-
-      {canCheck ? (
-        <ActionButton label="CHECK" glyph="✓" enabled onPress={() => onAct('check')} />
-      ) : (
-        <ActionButton
-          label="CALL"
-          glyph="✓"
-          amount={toCall}
-          enabled={canCall}
-          onPress={() => onAct('call')}
-        />
-      )}
-
-      <ActionButton
-        label={isAllInRaise ? 'ALL IN' : raiseVerb === 'bet' ? 'BET' : 'RAISE'}
-        glyph="⌃"
-        amount={bounds ? raiseAmount : 0}
-        enabled={Boolean(raiseVerb && bounds)}
-        onPress={() => raiseVerb && onAct(raiseVerb, raiseAmount)}
-      />
-
+      <View style={styles.actionsRow} pointerEvents="box-none">
+        {isMyTurn ? (
+          <>
+            {legal.includes('fold') && (
+              <TextAction glyph="✕" label="Fold" color={Palette.folded} onPress={() => onAct('fold')} />
+            )}
+            {canRaise && (
+              <TextAction
+                glyph="↗"
+                label={isAllIn ? 'All in' : raiseVerb === 'bet' ? 'Bet' : 'Raise'}
+                amount={raiseAmount}
+                color={Palette.raise}
+                onPress={() => raiseVerb && onAct(raiseVerb, raiseAmount)}
+              />
+            )}
+            {legal.includes('check') ? (
+              <TextAction glyph="✓" label="Check" color={Palette.check} onPress={() => onAct('check')} />
+            ) : legal.includes('call') ? (
+              <TextAction
+                glyph="✓"
+                label="Call"
+                amount={toCall}
+                color={Palette.check}
+                onPress={() => onAct('call')}
+              />
+            ) : null}
+          </>
+        ) : (
+          statusText && <Text style={styles.status}>{statusText}</Text>
+        )}
       </View>
     </View>
   );
 }
 
-function ActionButton({
-  label,
+function TextAction({
   glyph,
+  label,
   amount,
-  enabled,
-  onPress,
-  tone
+  color,
+  onPress
 }: {
-  label: string;
   glyph: string;
+  label: string;
   amount?: number;
-  enabled: boolean;
+  color: string;
   onPress: () => void;
-  tone?: 'fold';
 }) {
   return (
     <Pressable
-      style={({ pressed }) => [
-        styles.button,
-        !enabled && styles.buttonDisabled,
-        pressed && enabled && styles.buttonPressed
-      ]}
-      disabled={!enabled}
-      onPress={onPress}>
-      <View style={styles.buttonHeader}>
-        <Text style={styles.glyph}>{glyph}</Text>
-        <Text style={styles.buttonLabel}>{label}</Text>
-      </View>
-      <Text style={[styles.buttonAmount, tone === 'fold' && styles.foldAmount]}>
-        {amount ? formatChips(amount) : ''}
-      </Text>
+      onPress={onPress}
+      hitSlop={10}
+      style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
+      <Text style={[styles.glyph, { color }]}>{glyph}</Text>
+      <Text style={[styles.label, { color }]}>{label}</Text>
+      {amount ? <Text style={[styles.amount, { color }]}>{formatChips(amount)}</Text> : null}
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  bar: {
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: Palette.bar
-  },
-  sliderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  buttonRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  button: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 6,
-    borderRadius: 10,
-    backgroundColor: Palette.barRaised,
+  wrap: { paddingHorizontal: 14 },
+  sliderRow: { height: SLIDER_HEIGHT, flexDirection: 'row', alignItems: 'center' },
+  actionsRow: {
+    height: ACTIONS_HEIGHT,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    gap: 22
   },
-  buttonDisabled: { opacity: 0.3 },
-  buttonPressed: { backgroundColor: '#3D4147' },
-  buttonHeader: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  glyph: { color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: '700' },
-  buttonLabel: { color: '#fff', fontSize: 13, fontWeight: '700', letterSpacing: 0.5 },
-  buttonAmount: {
-    color: Palette.accent,
-    fontSize: 17,
-    fontWeight: '800',
-    minHeight: 21
-  },
-  foldAmount: { color: Palette.textDim },
-  amountBox: {
-    minWidth: 76,
+  action: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: Palette.barRaised,
-    alignItems: 'center'
+    paddingHorizontal: 6
   },
-  amountText: { color: Palette.accent, fontSize: 16, fontWeight: '800' }
+  actionPressed: { opacity: 0.55 },
+  glyph: { fontSize: 15, fontWeight: '800' },
+  label: { fontSize: 16, fontWeight: '700' },
+  amount: { fontSize: 16, fontWeight: '800', opacity: 0.85 },
+  status: { color: Palette.textMuted, fontSize: 13, fontWeight: '600' }
 });
