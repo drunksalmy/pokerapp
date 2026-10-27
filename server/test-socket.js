@@ -188,6 +188,42 @@ async function main() {
   check('chips are not confiscated', bobSeat && bobSeat.stack > 0, bobSeat && bobSeat.stack);
   check('seat count unchanged', alice.state.seats.filter(Boolean).length === seatedBefore);
 
+  // A phone that locks or switches apps drops its socket. If that happens
+  // between hands, the player must be dealt back in once they return -- not
+  // left silently sitting out with no way back.
+  console.log('\n=== Reconnecting between hands ===');
+  const dave = client('u-dave', 'Dave');
+  const erin = client('u-erin', 'Erin');
+  await Promise.all([dave.connected, erin.connected]);
+  await dave.emit('table:join', { tableId: 'reconnect-table' });
+  await erin.emit('table:join', { tableId: 'reconnect-table' });
+  // Erin sits out first, so no hand is running when Dave's connection drops.
+  await erin.emit('table:sit', { seatIndex: 1, buyIn: 1000 });
+  await erin.emit('table:sitOut', { sittingOut: true });
+  await dave.emit('table:sit', { seatIndex: 0, buyIn: 1000 });
+  await erin.waitFor(s => s.seats[0] !== null, 'dave seated');
+  check('no hand while the only other player sits out', erin.state.hand === null);
+
+  dave.socket.close();
+  await erin.waitFor(s => s.seats[0] && s.seats[0].connected === false, 'dave offline');
+
+  const daveBack = client('u-dave', 'Dave');
+  await daveBack.connected;
+  await daveBack.emit('table:join', { tableId: 'reconnect-table' });
+  await erin.waitFor(s => s.seats[0] && s.seats[0].connected === true, 'dave back online');
+  check('reconnecting does not leave the player sitting out', erin.state.seats[0].sittingOut === false, erin.state.seats[0]);
+
+  await erin.emit('table:sitOut', { sittingOut: false });
+  const dealt = await erin
+    .waitFor(s => s.hand !== null, 'a hand with both players', 3000)
+    .then(() => true)
+    .catch(() => false);
+  check(
+    'the next hand deals the reconnected player in',
+    dealt && erin.state.hand.players.some(p => p.userId === 'u-dave')
+  );
+
+  for (const c of [daveBack, erin]) c.socket.close();
   for (const c of all) c.socket.close();
   await sleep(200);
 

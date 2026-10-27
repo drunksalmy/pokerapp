@@ -85,9 +85,14 @@ class Table {
   setConnected(userId, connected) {
     const seatIndex = this.seatOfUser(userId);
     if (seatIndex === -1) return;
+    // Being offline already keeps a seat out of the next deal (eligibleSeats
+    // checks `connected`), so it must not also flip sittingOut. That flag is
+    // the player's own choice and nothing flipped it back on reconnect: a phone
+    // that locked for a moment between hands stayed sat out for good.
     this.seats[seatIndex].connected = connected;
-    if (!connected && !this.isInHand(userId)) this.seats[seatIndex].sittingOut = true;
     this.changed();
+    // Coming back may be what makes a table dealable again.
+    if (connected) this.maybeStartHand();
   }
 
   setSittingOut(userId, sittingOut) {
