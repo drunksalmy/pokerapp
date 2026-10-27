@@ -78,18 +78,6 @@ export const Status = {
   away: { bg: '#3a3546', fg: 'rgba(255,255,255,0.72)', label: 'AWAY' }
 } as const;
 
-// Saturated two-tone discs behind each player's initials, standing in for the
-// design's illustrated portraits. Picked per player from their id, so a player
-// keeps the same colour all session.
-export const AvatarGradients = [
-  ['#ffb347', '#ef5a1f'],
-  ['#7d8bff', '#3e4fe0'],
-  ['#ff7a7a', '#d6304a'],
-  ['#b28bff', '#6d3fe0'],
-  ['#5ee0c6', '#1f9d8a'],
-  ['#ff8fd0', '#c73f8e']
-] as const;
-
 // The action clock turns red for its final stretch, in milliseconds rather
 // than as a fraction, so "hurry up" means the same thing whatever the timer.
 export const CLOCK_CRITICAL_MS = 5000;

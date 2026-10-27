@@ -1,6 +1,6 @@
-import { LinearGradient } from 'expo-linear-gradient';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 
+import { CardBackImage, CardSlotImage } from '@/constants/poker-assets';
 import { Card as CardTheme } from '@/constants/poker-theme';
 import { readCard, type Card } from '@/lib/poker';
 
@@ -8,67 +8,64 @@ interface Props {
   card?: Card;
   width: number;
   height: number;
-  /** Slight fan, used for the hero's two cards. */
+  /** Slight fan, used for the hero's two cards and the board. */
   tilt?: number;
   dimmed?: boolean;
   /**
-   * Render an undealt position as a dashed outline instead of a card back.
-   * The community row uses this so it keeps its shape from preflop onward
-   * rather than popping into existence at the flop (CONTEXT.md 12.4).
+   * Render an undealt position as an empty slot instead of a card back. The
+   * community row uses this so it keeps its shape from preflop onward rather
+   * than popping into existence at the flop.
    */
   slot?: boolean;
 }
 
+/**
+ * A playing card. Backs and empty slots are the owner's own images; faces are
+ * drawn, because only 5 of the 52 faces exist as images. The drawn face
+ * follows those images: a small rank and suit in the top-left corner,
+ * mirrored in the bottom-right, and one large suit in the middle.
+ */
 export function PlayingCard({ card, width, height, tilt = 0, dimmed = false, slot = false }: Props) {
   const face = card ? readCard(card) : null;
-  const radius = Math.round(width * 0.14);
+  const radius = Math.round(width * 0.12);
   const frame = [
     { width, height, borderRadius: radius },
     tilt ? { transform: [{ rotate: `${tilt}deg` }] } : null,
     dimmed ? styles.dimmed : null
   ];
 
-  // An empty community position: outline only, no card.
+  // An empty community position: the dashed outline image, no card.
   if (!face && slot) {
-    return <View style={[styles.slot, ...frame]} />;
+    return <Image source={CardSlotImage} resizeMode="stretch" style={[styles.slot, ...frame]} />;
   }
 
   // No card, or one the server deliberately masked: show the back.
   if (!face) {
-    return (
-      <View style={[styles.back, ...frame]}>
-        <LinearGradient
-          colors={['#3b3250', CardTheme.back, '#1d1828']}
-          start={{ x: 0.1, y: 0 }}
-          end={{ x: 0.9, y: 1 }}
-          style={[StyleSheet.absoluteFill, { borderRadius: radius }]}
-        />
-        <View style={[styles.backInner, { borderRadius: radius * 0.6 }]} />
-      </View>
-    );
+    return <Image source={CardBackImage} resizeMode="stretch" style={[styles.back, ...frame]} />;
   }
 
   const ink = face.red ? CardTheme.red : CardTheme.ink;
+  const index = (
+    <>
+      <Text style={[styles.rank, { fontSize: height * 0.24, lineHeight: height * 0.26, color: ink }]}>
+        {face.rank}
+      </Text>
+      <Text style={[styles.cornerSuit, { fontSize: height * 0.17, lineHeight: height * 0.19, color: ink }]}>
+        {face.symbol}
+      </Text>
+    </>
+  );
 
   return (
     <View style={[styles.face, ...frame]}>
-      {/* Large solid suit, lower middle, as in the design. */}
-      <Text
+      <View style={[styles.corner, { top: height * 0.04, left: width * 0.08 }]}>{index}</View>
+      <Text style={[styles.pip, { fontSize: height * 0.46, color: ink }]}>{face.symbol}</Text>
+      <View
         style={[
-          styles.pip,
-          { fontSize: height * 0.46, color: ink, right: width * 0.1, bottom: height * 0.04 }
+          styles.corner,
+          { bottom: height * 0.04, right: width * 0.08, transform: [{ rotate: '180deg' }] }
         ]}>
-        {face.symbol}
-      </Text>
-
-      {/* Rank top-left with the suit tucked under it. */}
-      <View style={styles.corner}>
-        <Text style={[styles.rank, { fontSize: height * 0.36, color: ink }]} numberOfLines={1}>
-          {face.rank}
-        </Text>
-        <Text style={[styles.cornerSuit, { fontSize: height * 0.24, color: ink }]}>
-          {face.symbol}
-        </Text>
+        {index}
       </View>
     </View>
   );
@@ -77,43 +74,15 @@ export function PlayingCard({ card, width, height, tilt = 0, dimmed = false, slo
 const styles = StyleSheet.create({
   face: {
     backgroundColor: CardTheme.face,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.45,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4
-  },
-  slot: {
-    borderWidth: 1,
-    borderColor: CardTheme.slot,
-    borderStyle: 'dashed',
-    backgroundColor: 'rgba(255,255,255,0.02)'
-  },
-  back: {
-    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.28)',
-    shadowColor: '#000',
-    shadowOpacity: 0.4,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3
+    overflow: 'hidden'
   },
-  backInner: {
-    position: 'absolute',
-    top: 3,
-    left: 3,
-    right: 3,
-    bottom: 3,
-    borderWidth: 1,
-    borderColor: 'rgba(127,90,240,0.35)'
-  },
-  corner: { position: 'absolute', top: 1, left: 4 },
-  rank: { fontWeight: '800', letterSpacing: -0.5 },
-  cornerSuit: { marginTop: -4, fontWeight: '600' },
-  pip: { position: 'absolute' },
+  slot: { opacity: 0.6 },
+  back: { overflow: 'hidden' },
+  corner: { position: 'absolute', alignItems: 'center' },
+  rank: { fontWeight: '700', letterSpacing: -0.5 },
+  cornerSuit: { fontWeight: '600' },
+  pip: { marginTop: 2 },
   dimmed: { opacity: 0.45 }
 });

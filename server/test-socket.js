@@ -111,6 +111,13 @@ async function main() {
   check('button is assigned', Number.isInteger(alice.state.dealerSeat));
   check('blinds are posted', alice.state.hand.pot === 30, alice.state.hand.pot);
 
+  const portraits = alice.state.seats.filter(Boolean).map(s => s.avatar);
+  check(
+    'each seated player gets their own portrait number',
+    portraits.every(Number.isInteger) && new Set(portraits).size === portraits.length,
+    portraits
+  );
+
   console.log('\n=== Hole cards stay private ===');
   const aliceLeaks = findLeaks(alice.state, 'u-alice');
   const bobLeaks = findLeaks(bob.state, 'u-bob');

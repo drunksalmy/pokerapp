@@ -57,12 +57,24 @@ class Table {
       stack: buyIn,
       connected: true,
       sittingOut: false,
-      leaving: false
+      leaving: false,
+      avatar: this.freeAvatar()
     };
 
     this.changed();
     this.maybeStartHand();
     return seatIndex;
+  }
+
+  // The lowest portrait number nobody at the table is using. The client maps
+  // the number onto its pictures, so players never share a face until there
+  // are more players than pictures -- and a player keeps theirs while seated.
+  // Picking by seat or by id instead put duplicate faces at the table often.
+  freeAvatar() {
+    const taken = new Set(this.seats.filter(Boolean).map(seat => seat.avatar));
+    let avatar = 0;
+    while (taken.has(avatar)) avatar++;
+    return avatar;
   }
 
   leave(userId) {
@@ -289,7 +301,8 @@ class Table {
         stack: seat.stack,
         connected: seat.connected,
         sittingOut: seat.sittingOut,
-        leaving: seat.leaving
+        leaving: seat.leaving,
+        avatar: seat.avatar
       }),
       hand: null
     };

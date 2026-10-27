@@ -1,17 +1,17 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ActionBar, reservedBottomFor } from '@/components/poker/action-bar';
 import { BankPanel } from '@/components/poker/bank-panel';
 import { CarouselItem } from '@/components/poker/carousel-item';
+import { DealIn } from '@/components/poker/deal-in';
 import { HERO_HAND_HEIGHT, HERO_HAND_WIDTH, HeroHand } from '@/components/poker/hero-hand';
 import { PlayingCard } from '@/components/poker/playing-card';
-import { ArcGlow, PotGlow } from '@/components/poker/pot-glow';
 import { Seat, SEAT_ANCHOR_Y, SEAT_HEIGHT, SEAT_WIDTH } from '@/components/poker/seat';
-import { TableFelt } from '@/components/poker/table-felt';
+import { ChipAspect, ChipImages, TableBackgroundImage } from '@/constants/poker-assets';
 import { CardSize, Felt, Palette } from '@/constants/poker-theme';
 import { usePokerTable } from '@/hooks/use-poker-table';
 import {
@@ -26,8 +26,11 @@ import {
 // row and the pot number, which sit inside the notch-safe area. Measuring from
 // the raw screen top is what put a seat on top of the pot on a notched iPhone.
 const POT_CLEARANCE = 72;
-const ARC_GLOW_HEIGHT = 220;
 const BUY_IN_BLINDS = 100;
+// Widest the stage may be, as a fraction of its height. Phones are narrower
+// than this (an iPhone is about 0.46), so on a phone the stage is simply the
+// whole screen; tablets and desktop browsers get a centred column instead.
+const MAX_STAGE_ASPECT = 0.56;
 
 const STAGE_LABEL: Record<string, string> = {
   preflop: 'Pre-flop',
@@ -49,11 +52,11 @@ export default function TableScreen() {
     name: displayName
   });
 
-  const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const viewport = useWindowDimensions();
+  const stageWidth = Math.min(viewport.width, viewport.height * MAX_STAGE_ASPECT);
   const [screen, setScreen] = useState({ width: 0, height: 0 });
   const [raiseAmount, setRaiseAmount] = useState(0);
-  const [now, setNow] = useState(Date.now());
 
   // The game happens from just under the pot to the bottom of the screen. The
   // action buttons float over the bottom of that, with no bar behind them.
@@ -63,9 +66,9 @@ export default function TableScreen() {
   const geo = useMemo(
     () =>
       screen.width > 0 && playHeight > reservedBottom
-        ? tableGeometry(screen.width, playHeight, reservedBottom)
+        ? tableGeometry(screen.width, playHeight, reservedBottom, playTop)
         : null,
-    [screen.width, playHeight, reservedBottom]
+    [screen.width, playHeight, reservedBottom, playTop]
   );
 
   // Portrait only: the layout assumes a tall table with the viewer at the foot.
@@ -76,13 +79,10 @@ export default function TableScreen() {
     };
   }, []);
 
-  // Drives the countdowns. Only ticks while somebody is on the clock.
+  // When the current action clock runs out. The countdowns tick inside the
+  // ring and the Your Turn capsule that draw them (useClock), not here: ticking
+  // here re-rendered the whole table ten times a second.
   const deadline = snapshot?.deadline ?? null;
-  useEffect(() => {
-    if (!deadline) return;
-    const id = setInterval(() => setNow(Date.now()), 100);
-    return () => clearInterval(id);
-  }, [deadline]);
 
   const hand = snapshot?.hand ?? null;
   const mySeat = snapshot?.you.seatIndex ?? null;
@@ -90,7 +90,6 @@ export default function TableScreen() {
   const bounds = isMyTurn ? hand?.raiseBounds ?? null : null;
   const me = hand?.players.find(p => p.userId === userId) ?? null;
   const totalMs = snapshot?.actionTimeoutMs ?? 30000;
-  const remainingMs = deadline ? Math.max(0, deadline - now) : null;
 
   // Reset the slider to the minimum legal raise each time the turn comes round.
   const boundsKey = bounds ? `${bounds.min}-${bounds.max}` : 'none';
@@ -187,226 +186,216 @@ export default function TableScreen() {
         style={StyleSheet.absoluteFill}
       />
 
-      {/* The violet light behind the pot, spilling down onto the table's arc. */}
-      <View
-        style={[styles.glowWrap, { height: playTop + 120 }]}
-        pointerEvents="none">
-        <PotGlow width={screenWidth} height={playTop + 120} />
-      </View>
+      {/* The game plays in a phone-shaped stage. On a phone that is the whole
+          screen; in a wide desktop browser it is a centred column, because the
+          table picture is portrait and filling a landscape window with it
+          pushed the rim, the seats and the cards below the bottom edge. */}
+      <View style={[styles.stage, stageWidth < viewport.width && styles.stageFramed, { width: stageWidth }]}>
+        <View
+          style={styles.arena}
+          onLayout={e => {
+            const { width, height } = e.nativeEvent.layout;
+            setScreen({ width, height });
+          }}>
+          {geo && (
+            // The owner's table picture fills the screen: the dark room, the
+            // glow, the rim and the felt are all in it. The seats below are laid
+            // on its measured rim, so they sit on the table edge it shows.
+            <Image
+              source={TableBackgroundImage}
+              resizeMode="stretch"
+              style={[styles.background, geo.background]}
+            />
+          )}
 
-      <View
-        style={styles.arena}
-        onLayout={e => {
-          const { width, height } = e.nativeEvent.layout;
-          setScreen({ width, height });
-        }}>
-        {geo && (
-          // A true circle, deliberately wider than the phone: only its top arc
-          // shows, and the rest runs off the sides and past the bottom.
-          <View
-            pointerEvents="none"
-            style={[
-              styles.felt,
-              {
-                left: geo.centreX - geo.radius,
-                top: playTop + geo.centreY - geo.radius,
-                width: geo.radius * 2,
-                height: geo.radius * 2
-              }
-            ]}>
-            <TableFelt width={geo.radius * 2} height={geo.radius * 2} />
-          </View>
-        )}
+          {geo && (
+            // Seats, cards and the bank are placed in the visible play area: the
+            // band from under the pot to the bottom of the screen.
+            <View style={[styles.play, { top: playTop, height: playHeight }]} pointerEvents="box-none">
+              <View
+                style={[styles.board, { top: board.y - CardSize.community.h / 2 }]}
+                pointerEvents="none">
+                {/* Always five positions, fanned slightly: dealt cards deal in
+                    (rise 8pt and fade, 120ms each, 60ms apart), the rest stay as
+                    dashed outlines. */}
+                <View style={styles.community}>
+                  {Array.from({ length: 5 }).map((_, i) => {
+                    const card = hand?.community?.[i];
+                    const offset = i - 2;
+                    return (
+                      <View key={i} style={{ transform: [{ translateY: offset * offset * 2 }] }}>
+                        <DealIn dealtKey={card ?? null} delay={i * 60}>
+                          <PlayingCard
+                            card={card}
+                            slot={!card}
+                            width={CardSize.community.w}
+                            height={CardSize.community.h}
+                            tilt={offset * 5}
+                          />
+                        </DealIn>
+                      </View>
+                    );
+                  })}
+                </View>
 
-        {geo && (
-          // Where the pot's light lands: a bloom on the top of the arc.
-          <View
-            pointerEvents="none"
-            style={[
-              styles.arcGlow,
-              {
-                top: playTop + geo.centreY - geo.radius - ARC_GLOW_HEIGHT / 2,
-                height: ARC_GLOW_HEIGHT
-              }
-            ]}>
-            <ArcGlow width={screen.width} height={ARC_GLOW_HEIGHT} />
-          </View>
-        )}
-
-        {geo && (
-          // Seats, cards and the bank are placed in the visible play area, not
-          // on the felt, because most of the felt is off screen.
-          <View style={[styles.play, { top: playTop, height: playHeight }]} pointerEvents="box-none">
-            <View
-              style={[styles.board, { top: board.y - CardSize.community.h / 2 }]}
-              pointerEvents="none">
-              {/* Always five positions, fanned slightly: dealt cards fill in,
-                  the rest stay as dashed outlines. */}
-              <View style={styles.community}>
-                {Array.from({ length: 5 }).map((_, i) => {
-                  const card = hand?.community?.[i];
-                  const offset = i - 2;
-                  return (
-                    <View key={i} style={{ transform: [{ translateY: offset * offset * 2 }] }}>
-                      <PlayingCard
-                        card={card}
-                        slot={!card}
-                        width={CardSize.community.w}
-                        height={CardSize.community.h}
-                        tilt={offset * 5}
-                      />
-                    </View>
-                  );
-                })}
+                {announcement && (
+                  <View style={styles.announcement}>
+                    <Text style={styles.announcementText}>{announcement}</Text>
+                  </View>
+                )}
               </View>
 
-              {announcement && (
-                <View style={styles.announcement}>
-                  <Text style={styles.announcementText}>{announcement}</Text>
+              {slots.map(slot => {
+                if (slot.isHero) return null;
+                const seatIndex = slot.seatIndex;
+                const seat = snapshot?.seats[seatIndex] ?? null;
+                const player = hand?.players.find(p => p.seatIndex === seatIndex);
+                const isToAct = Boolean(hand && player && hand.toAct === player.userId);
+
+                return (
+                  <CarouselItem
+                    key={seatIndex}
+                    left={slot.x - SEAT_WIDTH / 2}
+                    top={slot.y - SEAT_ANCHOR_Y}
+                    scale={slot.scale}
+                    opacity={slot.opacity}
+                    slot={slot.slot}
+                    ringSize={ringSize}
+                    layoutKey={layoutKey}
+                    style={styles.seat}>
+                    <Seat
+                      seat={seat}
+                      player={player}
+                      isToAct={isToAct}
+                      isDealer={snapshot?.dealerSeat === seatIndex}
+                      deadline={isToAct ? deadline : null}
+                      totalMs={totalMs}
+                      revealed={hand?.stage === 'complete' && Boolean(player) && !player!.folded}
+                      canSit={mySeat === null}
+                      onSit={() => handleSit(seatIndex)}
+                    />
+                  </CarouselItem>
+                );
+              })}
+
+              {heroSlot &&
+                (me && me.holeCards.length === 2 ? (
+                  <View
+                    style={[
+                      styles.hero,
+                      {
+                        left: heroSlot.x - HERO_HAND_WIDTH / 2,
+                        top: heroSlot.y - HERO_HAND_HEIGHT / 2
+                      }
+                    ]}
+                    pointerEvents="none">
+                    <HeroHand
+                      cards={me.holeCards}
+                      dimmed={me.folded}
+                      handNumber={snapshot?.handNumber ?? 0}
+                    />
+                  </View>
+                ) : mySittingOut ? (
+                  // You have no avatar or pill in this design, so this is the only
+                  // place being sat out shows -- and the way back in, since the
+                  // header gear sits under Expo Go's own button during development.
+                  <Pressable
+                    style={[styles.heroSitOut, { top: heroSlot.y - 22 }]}
+                    onPress={() => sitOut(false)}
+                    hitSlop={10}>
+                    <Text style={styles.heroWaitingText}>You’re sitting out</Text>
+                    <Text style={styles.heroBack}>Tap to play</Text>
+                  </Pressable>
+                ) : (
+                  <Text style={[styles.heroWaiting, styles.heroWaitingText, { top: heroSlot.y - 9 }]}>
+                    {hand ? 'You’re in from the next hand' : 'Waiting for the next hand'}
+                  </Text>
+                ))}
+
+              {mySeat !== null && (
+                <View style={[styles.bank, { bottom: reservedBottom + 4 }]} pointerEvents="none">
+                  <BankPanel
+                    stack={myStack}
+                    bet={me?.betThisRound ?? 0}
+                    isDealer={snapshot?.dealerSeat === mySeat}
+                    allIn={me?.allIn ?? false}
+                    isMyTurn={isMyTurn}
+                    deadline={isMyTurn ? deadline : null}
+                    totalMs={totalMs}
+                  />
                 </View>
               )}
             </View>
-
-            {slots.map(slot => {
-              if (slot.isHero) return null;
-              const seatIndex = slot.seatIndex;
-              const seat = snapshot?.seats[seatIndex] ?? null;
-              const player = hand?.players.find(p => p.seatIndex === seatIndex);
-              const isToAct = Boolean(hand && player && hand.toAct === player.userId);
-
-              return (
-                <CarouselItem
-                  key={seatIndex}
-                  left={slot.x - SEAT_WIDTH / 2}
-                  top={slot.y - SEAT_ANCHOR_Y}
-                  scale={slot.scale}
-                  opacity={slot.opacity}
-                  slot={slot.slot}
-                  ringSize={ringSize}
-                  layoutKey={layoutKey}
-                  style={styles.seat}>
-                  <Seat
-                    seat={seat}
-                    player={player}
-                    isToAct={isToAct}
-                    isDealer={snapshot?.dealerSeat === seatIndex}
-                    remainingMs={isToAct ? remainingMs : null}
-                    totalMs={totalMs}
-                    revealed={hand?.stage === 'complete' && Boolean(player) && !player!.folded}
-                    canSit={mySeat === null}
-                    onSit={() => handleSit(seatIndex)}
-                  />
-                </CarouselItem>
-              );
-            })}
-
-            {heroSlot &&
-              (me && me.holeCards.length === 2 ? (
-                <View
-                  style={[
-                    styles.hero,
-                    {
-                      left: heroSlot.x - HERO_HAND_WIDTH / 2,
-                      top: heroSlot.y - HERO_HAND_HEIGHT / 2
-                    }
-                  ]}
-                  pointerEvents="none">
-                  <HeroHand cards={me.holeCards} dimmed={me.folded} />
-                </View>
-              ) : mySittingOut ? (
-                // You have no avatar or pill in this design, so this is the only
-                // place being sat out shows -- and the way back in, since the
-                // header gear sits under Expo Go's own button during development.
-                <Pressable
-                  style={[styles.heroSitOut, { top: heroSlot.y - 22 }]}
-                  onPress={() => sitOut(false)}
-                  hitSlop={10}>
-                  <Text style={styles.heroWaitingText}>You’re sitting out</Text>
-                  <Text style={styles.heroBack}>Tap to play</Text>
-                </Pressable>
-              ) : (
-                <Text style={[styles.heroWaiting, styles.heroWaitingText, { top: heroSlot.y - 9 }]}>
-                  {hand ? 'You’re in from the next hand' : 'Waiting for the next hand'}
-                </Text>
-              ))}
-
-            {mySeat !== null && (
-              <View style={[styles.bank, { bottom: reservedBottom + 4 }]} pointerEvents="none">
-                <BankPanel
-                  stack={myStack}
-                  bet={me?.betThisRound ?? 0}
-                  isDealer={snapshot?.dealerSeat === mySeat}
-                  allIn={me?.allIn ?? false}
-                  isMyTurn={isMyTurn}
-                  remainingMs={isMyTurn ? remainingMs : null}
-                  totalMs={totalMs}
-                />
-              </View>
-            )}
-          </View>
-        )}
-      </View>
-
-      <SafeAreaView style={styles.headerWrap} edges={['top', 'left', 'right']} pointerEvents="box-none">
-        <View style={styles.header} pointerEvents="box-none">
-          <Pressable style={styles.menu} hitSlop={8}>
-            <View style={styles.menuBar} />
-            <View style={styles.menuBar} />
-            <View style={styles.menuBar} />
-          </Pressable>
-          <View>
-            <Text style={styles.headerTitle}>Games</Text>
-            {status !== 'connected' ? (
-              <Text style={styles.connection}>
-                {status === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
-              </Text>
-            ) : (
-              snapshot && (
-                <Text style={styles.blinds}>
-                  Blinds {formatChips(snapshot.smallBlind)}/{formatChips(snapshot.bigBlind)}
-                </Text>
-              )
-            )}
-          </View>
-
-          {/* The pot is the single biggest number on the screen. */}
-          <View style={styles.headerCentre} pointerEvents="none">
-            <Text style={styles.potLabel}>Pot</Text>
-            <Text style={styles.potValue}>{formatChips(hand?.pot ?? 0)}</Text>
-          </View>
-
-          <View style={styles.headerRight}>
-            <Pressable
-              style={styles.iconButton}
-              hitSlop={8}
-              onPress={() => snapshot && sitOut(!snapshot.seats[mySeat ?? -1]?.sittingOut)}>
-              <Text style={styles.gear}>⚙</Text>
-            </Pressable>
-            <Pressable style={[styles.iconButton, styles.help]} hitSlop={8}>
-              <Text style={styles.helpText}>?</Text>
-            </Pressable>
-          </View>
+          )}
         </View>
-      </SafeAreaView>
 
-      {error && (
-        <Pressable style={[styles.error, { bottom: reservedBottom + 12 }]} onPress={clearError}>
-          <Text style={styles.errorText}>{error}</Text>
-        </Pressable>
-      )}
+        <SafeAreaView style={styles.headerWrap} edges={['top', 'left', 'right']} pointerEvents="box-none">
+          <View style={styles.header} pointerEvents="box-none">
+            <Pressable style={styles.menu} hitSlop={8}>
+              <View style={styles.menuBar} />
+              <View style={styles.menuBar} />
+              <View style={styles.menuBar} />
+            </Pressable>
+            <View>
+              <Text style={styles.headerTitle}>Games</Text>
+              {status !== 'connected' ? (
+                <Text style={styles.connection}>
+                  {status === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
+                </Text>
+              ) : (
+                snapshot && (
+                  <Text style={styles.blinds}>
+                    Blinds {formatChips(snapshot.smallBlind)}/{formatChips(snapshot.bigBlind)}
+                  </Text>
+                )
+              )}
+            </View>
 
-      <View style={styles.actionBarWrap} pointerEvents="box-none">
-        <ActionBar
-          hand={hand}
-          viewerId={userId}
-          isMyTurn={isMyTurn}
-          bigBlind={snapshot?.bigBlind ?? 20}
-          raiseAmount={raiseAmount}
-          onChangeRaise={setRaiseAmount}
-          onAct={(action: Action, amount?: number) => act(action, amount)}
-          statusText={statusText}
-          bottomInset={insets.bottom}
-        />
+            {/* The pot is the single biggest number on the screen. */}
+            <View style={styles.headerCentre} pointerEvents="none">
+              <View style={styles.potLabelRow}>
+                <Image
+                  source={ChipImages.red}
+                  style={{ width: 12 * ChipAspect.red, height: 12 }}
+                />
+                <Text style={styles.potLabel}>Pot</Text>
+              </View>
+              <Text style={styles.potValue}>{formatChips(hand?.pot ?? 0)}</Text>
+            </View>
+
+            <View style={styles.headerRight}>
+              <Pressable
+                style={styles.iconButton}
+                hitSlop={8}
+                onPress={() => snapshot && sitOut(!snapshot.seats[mySeat ?? -1]?.sittingOut)}>
+                <Text style={styles.gear}>⚙</Text>
+              </Pressable>
+              <Pressable style={[styles.iconButton, styles.help]} hitSlop={8}>
+                <Text style={styles.helpText}>?</Text>
+              </Pressable>
+            </View>
+          </View>
+        </SafeAreaView>
+
+        {error && (
+          <Pressable style={[styles.error, { bottom: reservedBottom + 12 }]} onPress={clearError}>
+            <Text style={styles.errorText}>{error}</Text>
+          </Pressable>
+        )}
+
+        <View style={styles.actionBarWrap} pointerEvents="box-none">
+          <ActionBar
+            hand={hand}
+            viewerId={userId}
+            isMyTurn={isMyTurn}
+            bigBlind={snapshot?.bigBlind ?? 20}
+            raiseAmount={raiseAmount}
+            onChangeRaise={setRaiseAmount}
+            onAct={(action: Action, amount?: number) => act(action, amount)}
+            statusText={statusText}
+            bottomInset={insets.bottom}
+          />
+        </View>
       </View>
     </View>
   );
@@ -414,10 +403,16 @@ export default function TableScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Felt.woodBottom },
-  glowWrap: { position: 'absolute', top: 0, left: 0, right: 0 },
+  stage: { flex: 1, alignSelf: 'center', overflow: 'hidden' },
+  // A faint edge, so the column reads as deliberate rather than as a page
+  // that failed to stretch.
+  stageFramed: {
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(185,163,255,0.18)'
+  },
   arena: { ...StyleSheet.absoluteFill },
-  felt: { position: 'absolute' },
-  arcGlow: { position: 'absolute', left: 0, right: 0 },
+  background: { position: 'absolute' },
   play: { position: 'absolute', left: 0, right: 0 },
   board: { position: 'absolute', left: 0, right: 0, alignItems: 'center', gap: 16 },
   community: { flexDirection: 'row', gap: 6, minHeight: CardSize.community.h },
@@ -460,6 +455,7 @@ const styles = StyleSheet.create({
   blinds: { color: Palette.textMuted, fontSize: 11, fontWeight: '600', marginTop: 1 },
   connection: { color: Palette.danger, fontSize: 11, fontWeight: '700', marginTop: 1 },
   headerCentre: { position: 'absolute', left: 0, right: 0, top: 2, alignItems: 'center' },
+  potLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   potLabel: { color: Palette.textDim, fontSize: 12, fontWeight: '600' },
   potValue: {
     color: Palette.text,
